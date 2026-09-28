@@ -414,23 +414,105 @@ function processSettledSong(expectedTitle) {
     }
 }
 
-function createButton(text, onClick) {
-    const btn = document.createElement("button");
-    btn.innerText = text;
-    btn.style.cssText = `
-        background: rgba(255, 0, 0, 0.2); border: 1px solid #ff4444; color: #ffcccc; 
-        border-radius: 4px; margin: 0 5px; padding: 6px 12px; cursor: pointer; 
-        font-size: 11px; font-weight: 800; text-transform: uppercase; z-index: 9999;
+// NEW: кнопки "Ban Artist" / "Ban Song" в стиле Material Design —
+// tonal-кнопка (M3 error container), пилюля, иконка + ripple-эффект по клику.
+
+function ensureMaterialButtonStyles() {
+    if (document.getElementById("ytm-ward-md-styles")) return;
+    const style = document.createElement("style");
+    style.id = "ytm-ward-md-styles";
+    style.textContent = `
+        .ytm-ward-md-btn {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            height: 32px;
+            padding: 0 14px 0 10px;
+            border: none;
+            border-radius: 16px;
+            background: rgba(255, 82, 82, 0.16);
+            color: #ffb4ab;
+            font-family: "Roboto", "YouTube Sans", Arial, sans-serif;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0.15px;
+            line-height: 1;
+            cursor: pointer;
+            overflow: hidden;
+            -webkit-tap-highlight-color: transparent;
+            transition: background-color 150ms cubic-bezier(0.4,0,0.2,1),
+                        box-shadow 150ms cubic-bezier(0.4,0,0.2,1);
+        }
+        .ytm-ward-md-btn:hover { background: rgba(255, 82, 82, 0.24); }
+        .ytm-ward-md-btn:active { background: rgba(255, 82, 82, 0.32); }
+        .ytm-ward-md-btn:focus-visible {
+            outline: 2px solid #ffb4ab;
+            outline-offset: 2px;
+        }
+        .ytm-ward-md-btn__icon {
+            display: inline-flex;
+            width: 16px; height: 16px;
+            flex-shrink: 0;
+        }
+        .ytm-ward-md-btn__icon svg { width: 100%; height: 100%; display: block; }
+        .ytm-ward-md-btn__ripple {
+            position: absolute;
+            border-radius: 50%;
+            background: currentColor;
+            opacity: 0.3;
+            transform: scale(0);
+            pointer-events: none;
+        }
+        .ytm-ward-md-btn__ripple.is-animating {
+            animation: ytmWardRipple 450ms cubic-bezier(0.4,0,0.2,1);
+        }
+        @keyframes ytmWardRipple {
+            to { transform: scale(2.5); opacity: 0; }
+        }
     `;
-    btn.onmouseenter = () => { btn.style.background = "#ff4444"; btn.style.color = "black"; };
-    btn.onmouseleave = () => { btn.style.background = "rgba(255, 0, 0, 0.2)"; btn.style.color = "#ffcccc"; };
-    btn.onclick = (e) => { e.stopPropagation(); onClick(); };
+    document.head.appendChild(style);
+}
+
+const BAN_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="5.5" y1="18.5" x2="18.5" y2="5.5"/></svg>`;
+
+function spawnRipple(btn, event) {
+    const ripple = btn.querySelector(".ytm-ward-md-btn__ripple");
+    if (!ripple) return;
+    const rect = btn.getBoundingClientRect();
+    const size = Math.max(rect.width, rect.height);
+    const x = (event ? event.clientX - rect.left : rect.width / 2) - size / 2;
+    const y = (event ? event.clientY - rect.top : rect.height / 2) - size / 2;
+    ripple.style.width = ripple.style.height = `${size}px`;
+    ripple.style.left = `${x}px`;
+    ripple.style.top = `${y}px`;
+    ripple.classList.remove("is-animating");
+    void ripple.offsetWidth; // reflow, чтобы анимация перезапускалась при повторных кликах
+    ripple.classList.add("is-animating");
+}
+
+function createButton(label, iconSvg, onClick) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ytm-ward-md-btn";
+    btn.innerHTML = `
+        <span class="ytm-ward-md-btn__ripple"></span>
+        <span class="ytm-ward-md-btn__icon">${iconSvg}</span>
+        <span class="ytm-ward-md-btn__label">${label}</span>
+    `;
+    btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        spawnRipple(btn, e);
+        onClick();
+    });
     return btn;
 }
 
 function injectButtons() {
     if (!engineEnabled) return;
     if (document.getElementById("ytm-ward-controls")) return;
+
+    ensureMaterialButtonStyles();
 
     const threeDots = document.querySelector("ytmusic-player-bar .middle-controls-buttons ytmusic-menu-renderer") ||
                       document.querySelector("ytmusic-player-bar ytmusic-menu-renderer");
@@ -442,13 +524,15 @@ function injectButtons() {
         container.id = "ytm-ward-controls";
         container.style.display = "inline-flex";
         container.style.alignItems = "center";
-        
-        container.appendChild(createButton("🚫 ARTIST", () => {
+        container.style.gap = "6px";
+        container.style.margin = "0 6px";
+
+        container.appendChild(createButton("Ban Artist", BAN_ICON_SVG, () => {
             const song = getSongInfo();
             if (song) addToBlockList(song.artist, 'blockedArtists');
         }));
-        
-        container.appendChild(createButton("🚫 SONG", () => {
+
+        container.appendChild(createButton("Ban Song", BAN_ICON_SVG, () => {
             const song = getSongInfo();
             if (song) addToBlockList(song, 'blockedTracks');
         }));
