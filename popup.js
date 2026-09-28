@@ -1,6 +1,6 @@
 /*
  * YTM Ward - Popup Script (Counter Version)
- * Created by Spirit Flame
+ * Created by Spirit Flame modified by DimmOFF
  */
 
 // DOM Elements
@@ -14,6 +14,19 @@ const btnRefresh = document.getElementById('btn-refresh');
 const btnExport = document.getElementById('btn-export');
 const btnImport = document.getElementById('btn-import');
 const fileInput = document.getElementById('file-input');
+const actionsRow = document.getElementById('actions-row');
+
+// Settings tab elements
+const settingsPanel = document.getElementById('settings-panel');
+const optLabel = document.getElementById('opt-label');
+const optDislike = document.getElementById('opt-dislike');
+const optSkipAi = document.getElementById('opt-skip-ai');
+const rowSkipAi = document.getElementById('row-skip-ai');
+
+// Master on/off switch
+const engineToggle = document.getElementById('engine-toggle');
+
+const DEFAULT_AI_ACTIONS = { label: true, dislike: true, skipAi: false };
 
 let currentTab = 'keywords';
 
@@ -47,19 +60,82 @@ function safeSort(items) {
     });
 }
 
+// --- MASTER ON/OFF SWITCH ---
+
+function loadEngineToggle() {
+    chrome.storage.local.get(['engineEnabled'], (res) => {
+        engineToggle.checked = res.engineEnabled !== false;
+    });
+}
+
+engineToggle.addEventListener('change', () => {
+    const enabled = engineToggle.checked;
+    chrome.storage.local.set({ engineEnabled: enabled }, () => {
+        showStatus(enabled ? 'Extension enabled.' : 'Extension disabled.', enabled ? '#4caf50' : '#ff4444');
+    });
+});
+
+// --- SETTINGS TAB ---
+
+// Skip AI визуально "выключен", когда Dislike AI and Skip включена —
+// он всё равно игнорируется в этом случае (см. content.js: checkAndSkip).
+function updateSkipAiAvailability() {
+    const ignored = optDislike.checked;
+    optSkipAi.disabled = ignored;
+    rowSkipAi.classList.toggle('disabled', ignored);
+}
+
+function loadSettingsUI() {
+    chrome.storage.local.get(['aiActions'], (res) => {
+        const actions = { ...DEFAULT_AI_ACTIONS, ...(res.aiActions || {}) };
+        optLabel.checked = actions.label;
+        optDislike.checked = actions.dislike;
+        optSkipAi.checked = actions.skipAi;
+        updateSkipAiAvailability();
+    });
+}
+
+function saveSettingsUI() {
+    const actions = {
+        label: optLabel.checked,
+        dislike: optDislike.checked,
+        skipAi: optSkipAi.checked
+    };
+    chrome.storage.local.set({ aiActions: actions }, () => {
+        showStatus('Settings saved.', '#4caf50');
+    });
+}
+
+optLabel.addEventListener('change', saveSettingsUI);
+optSkipAi.addEventListener('change', saveSettingsUI);
+optDislike.addEventListener('change', () => {
+    updateSkipAiAvailability();
+    saveSettingsUI();
+});
+
 // --- RENDERING ---
 
 function render() {
     list.innerHTML = '';
-    
-    // AI TAB (Counter View)
+    settingsPanel.style.display = 'none';
+    list.style.display = '';
+    inputArea.style.display = 'none';
+    actionsRow.style.display = 'flex'; // по умолчанию видим, скрываем только на Settings
+
+    if (currentTab === 'settings') {
+        settingsPanel.style.display = 'block';
+        list.style.display = 'none';
+        actionsRow.style.display = 'none'; // MOD: на Settings кнопки не нужны
+        loadSettingsUI();
+        return;
+    }
+
     if (currentTab === 'ai') {
         inputArea.style.display = 'none';
         fetchAIList(); 
         return;
     }
 
-    // LOCAL TABS (List View)
     inputArea.style.display = 'flex';
     const key = KEYS[currentTab];
     
@@ -89,29 +165,31 @@ function render() {
 
 function fetchAIList() {
     list.innerHTML = '<li style="justify-content:center; color:#888;">Checking Database...</li>';
-    
-    const url = 'https://raw.githubusercontent.com/xoundbyte/soul-over-ai/main/dist/artists.json';
-    const t = new Date().getTime(); 
-    
-    fetch(`${url}?t=${t}`)
-        .then(r => {
-            if(!r.ok) throw new Error(`HTTP ${r.status}`);
-            return r.json();
+
+    chrome.runtime.sendMessage({ type: 'FETCH_AI_ARTISTS' })
+        .then(result => {
+            if (!result || !result.ok) throw new Error((result && result.error) || 'Unknown error');
+            return result.data;
         })
         .then(data => {
             let raw = [];
             if (Array.isArray(data)) raw = data;
             else if (data.artists) raw = data.artists;
+            else if (data.data) raw = data.data;
+            else if (data.results) raw = data.results;
+            else if (data.items) raw = data.items;
             else raw = Object.values(data).flat();
 
-            const count = raw.length;
+            const names = raw
+                .map(item => (typeof item === 'string') ? item : (item && item.removed !== true ? (item.name || item.artist || item.artist_name || item.artistName || item.title) : null))
+                .filter(n => typeof n === 'string' && n.trim().length > 0);
+            const count = names.length;
             
-            // NEW SUMMARY VIEW
             list.innerHTML = `
                 <li style="display:block; text-align:center; padding-top:60px; border-bottom:none; pointer-events:none;">
                     <div style="font-size:48px; font-weight:800; color:#ff4444; line-height:1;">${count}</div>
-                    <div style="font-size:12px; font-weight:bold; color:#aaa; margin-top:5px; text-transform:uppercase; letter-spacing:1px;">AI Artists Blocked</div>
-                    <div style="font-size:10px; color:#555; margin-top:20px;">Source: Soul Over AI Database</div>
+                    <div style="font-size:12px; font-weight:bold; color:#aaa; margin-top:5px; text-transform:uppercase; letter-spacing:1px;">AI Artists Tracked</div>
+                    <div style="font-size:10px; color:#555; margin-top:20px;">Source: ZoundHub Database</div>
                 </li>
             `;
             
@@ -201,6 +279,7 @@ fileInput.onchange = (e) => {
             const data = JSON.parse(event.target.result);
             chrome.storage.local.set(data, () => {
                 render();
+                loadEngineToggle();
                 showStatus('Import Successful.', '#4caf50');
             });
         } catch(err) {
@@ -212,3 +291,4 @@ fileInput.onchange = (e) => {
 
 // Start
 render();
+loadEngineToggle();

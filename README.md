@@ -97,4 +97,4 @@ All data (blocked artists, songs, and keywords) is stored locally on your device
 ---
 
 ## 🤝 Credits
-* **AI Database:** [Soul Over AI](https://github.com/xoundbyte/soul-over-ai) by [xoundbyte](https://github.com/xoundbyte)
+* **AI Database:** [Zoundhub](https://zoundhub.com/listSoul) aggregates publicly available music metadata and third-party outputs into a structured view. It is designed to explore patterns in music releases using external data, without making claims about artists or their work.

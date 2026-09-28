@@ -4,18 +4,21 @@
   <meta charset="UTF-8">
   <style>
     body { width: 340px; font-family: 'Segoe UI', sans-serif; background: #1a1a1a; color: #fff; padding: 15px; }
-    h2 { margin: 0 0 10px 0; font-size: 16px; color: #ff4444; text-transform: uppercase; letter-spacing: 1px; }
-    
+
+    .header-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .header-row h2 { margin: 0; font-size: 16px; color: #ff4444; text-transform: uppercase; letter-spacing: 1px; }
+    .header-row .version { margin-left: auto; font-size: 10px; color: #666; font-weight: normal; text-transform: none; letter-spacing: 0; }
+
     /* Tabs */
-    .tabs { display: flex; gap: 5px; margin-bottom: 15px; }
-    .tab-btn { flex: 1; padding: 8px; background: #333; border: none; color: #aaa; cursor: pointer; font-size: 12px; border-radius: 4px; transition: 0.2s; }
+    .tabs { display: flex; gap: 5px; margin-bottom: 15px; flex-wrap: wrap; }
+    .tab-btn { flex: 1; min-width: 60px; padding: 8px; background: #333; border: none; color: #aaa; cursor: pointer; font-size: 12px; border-radius: 4px; transition: 0.2s; }
     .tab-btn:hover { background: #444; color: #fff; }
     .tab-btn.active { background: #ff4444; color: white; font-weight: bold; }
     
     /* Inputs */
     .input-group { display: flex; gap: 5px; margin-bottom: 10px; }
-    input { flex: 1; padding: 8px; background: #2a2a2a; border: 1px solid #444; color: white; border-radius: 4px; outline: none; }
-    input:focus { border-color: #ff4444; }
+    input[type="text"] { flex: 1; padding: 8px; background: #2a2a2a; border: 1px solid #444; color: white; border-radius: 4px; outline: none; }
+    input[type="text"]:focus { border-color: #ff4444; }
     button#add { padding: 8px 15px; background: #444; border: none; color: white; cursor: pointer; border-radius: 4px; font-weight: bold; }
     button#add:hover { background: #ff4444; }
 
@@ -26,8 +29,33 @@
     li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
     .delete-btn { color: #666; cursor: pointer; font-weight: bold; padding: 2px 6px; border-radius: 4px; }
     .delete-btn:hover { color: #ff4444; background: rgba(255,68,68,0.1); }
-    
-    /* Actions Footer */
+
+    /* Settings panel — без фиксированной высоты и скролла */
+    #settings-panel { padding: 5px 0 15px 0; }
+    .settings-hint { font-size: 11px; color: #888; margin-bottom: 15px; line-height: 1.4; }
+    .settings-checkbox { display: flex; align-items: center; gap: 10px; padding: 10px 8px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: 0.2s; }
+    .settings-checkbox:hover { background: #2a2a2a; }
+    .settings-checkbox input[type="checkbox"] { width: 16px; height: 16px; accent-color: #ff4444; cursor: pointer; }
+    /* Состояние "проигнорировано", когда включена Dislike AI and Skip */
+    .settings-checkbox.disabled { opacity: 0.4; cursor: not-allowed; }
+    .settings-checkbox.disabled:hover { background: none; }
+    .settings-checkbox.disabled input[type="checkbox"] { cursor: not-allowed; }
+
+    /* Toggle switch */
+    .switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch .slider {
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #444; transition: 0.2s; border-radius: 20px;
+    }
+    .switch .slider:before {
+      position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px;
+      background-color: white; transition: 0.2s; border-radius: 50%;
+    }
+    .switch input:checked + .slider { background-color: #4caf50; }
+    .switch input:checked + .slider:before { transform: translateX(16px); }
+
+    /* Actions Footer (скрывается на вкладке Settings через JS) */
     .actions { display: flex; gap: 5px; margin-top: 15px; padding-top: 10px; border-top: 1px solid #333; }
     .action-btn { flex: 1; padding: 6px; background: #333; border: none; color: #ccc; font-size: 11px; cursor: pointer; border-radius: 4px; }
     .action-btn:hover { background: #444; color: #fff; }
@@ -37,13 +65,21 @@
   </style>
 </head>
 <body>
-  <h2>YTM AI Blocker <span style="font-size:10px; color:#666; float:right; margin-top:4px;">v1.4</span></h2>
+  <div class="header-row">
+    <label class="switch">
+      <input type="checkbox" id="engine-toggle" checked>
+      <span class="slider"></span>
+    </label>
+    <h2>YTM AI Blocker</h2>
+    <span class="version">v1.5</span>
+  </div>
 
   <div class="tabs">
     <button class="tab-btn active" data-tab="keywords">Keywords</button>
     <button class="tab-btn" data-tab="songs">Songs</button>
     <button class="tab-btn" data-tab="artists">Artists</button>
     <button class="tab-btn" data-tab="ai">AI DB</button>
+    <button class="tab-btn" data-tab="settings">Settings</button>
   </div>
 
   <div class="input-group" id="input-area">
@@ -53,7 +89,26 @@
 
   <ul id="list"></ul>
 
-  <div class="actions">
+  <div id="settings-panel" style="display:none;">
+    <div class="settings-hint">On AI artist detection, apply:</div>
+
+    <label class="settings-checkbox" id="row-label">
+      <input type="checkbox" id="opt-label">
+      <span>Show AI Label</span>
+    </label>
+
+    <label class="settings-checkbox" id="row-dislike">
+      <input type="checkbox" id="opt-dislike">
+      <span>Dislike AI and Skip</span>
+    </label>
+
+    <label class="settings-checkbox" id="row-skip-ai">
+      <input type="checkbox" id="opt-skip-ai">
+      <span>Skip AI</span>
+    </label>
+  </div>
+
+  <div class="actions" id="actions-row">
     <button class="action-btn" id="btn-refresh">↻ Reload DB</button>
     <button class="action-btn" id="btn-export">⬇ Export JSON</button>
     <button class="action-btn" id="btn-import">⬆ Import JSON</button>
