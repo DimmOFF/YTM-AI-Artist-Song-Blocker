@@ -26,7 +26,7 @@ const rowSkipAi = document.getElementById('row-skip-ai');
 // Master on/off switch
 const engineToggle = document.getElementById('engine-toggle');
 
-const DEFAULT_AI_ACTIONS = { label: true, dislike: true, skipAi: false };
+const DEFAULT_AI_ACTIONS = { label: true, dislike: false, skipAi: true };
 
 let currentTab = 'keywords';
 

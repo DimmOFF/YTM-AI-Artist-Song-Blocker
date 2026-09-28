@@ -120,6 +120,8 @@ function findWholeWordMatch(text, list) {
 }
 
 function skipTrack() {
+    hideBadgeImmediately();
+
     const songBeforeSkip = getSongInfo();
 
     const nextBtn = document.querySelector("ytmusic-player-bar .next-button");
@@ -142,6 +144,8 @@ function isAlreadyDisliked(dislikeWrapper, actualBtn, song) {
 }
 
 function handleDislikeAndSkip(song) {
+    hideBadgeImmediately();
+
     const dislikeWrapper = document.querySelector(".middle-controls-buttons .dislike") || 
                            document.querySelector("ytmusic-player-bar .dislike");
 
@@ -349,6 +353,24 @@ const SETTLE_DELAY_MS = 1000;
 let settleTimer = null;
 let settleTitle = null;
 
+const BADGE_SETTLE_MS = 60;
+let badgeTimer = null;
+
+function scheduleBadgeUpdate() {
+    clearTimeout(badgeTimer);
+    badgeTimer = setTimeout(() => {
+        const song = getSongInfo();
+        if (!song) return;
+        const aiMatch = !!findWholeWordMatch(song.artist.toLowerCase(), aiArtistList);
+        updateAIBadge(aiMatch && aiActions.label);
+    }, BADGE_SETTLE_MS);
+}
+
+function hideBadgeImmediately() {
+    clearTimeout(badgeTimer);
+    updateAIBadge(false);
+}
+
 function checkAndSkip() {
     if (!engineEnabled) return;
 
@@ -356,8 +378,6 @@ function checkAndSkip() {
     if (!song) return;
 
     if (song.title !== settleTitle) {
-        // Название изменилось (или это первая проверка) — перезапускаем таймер
-        // ожидания устаканивания. Пока трек не "устоится", ничего не решаем.
         settleTitle = song.title;
         clearTimeout(settleTimer);
         settleTimer = setTimeout(() => processSettledSong(settleTitle), SETTLE_DELAY_MS);
@@ -366,11 +386,8 @@ function checkAndSkip() {
 
 function processSettledSong(expectedTitle) {
     const song = getSongInfo();
-    // Если трек уже снова сменился за время ожидания — этот вызов устарел,
-    // его подхватит уже новый таймер из checkAndSkip().
     if (!song || song.title !== expectedTitle) return;
 
-    // Плашку показываем сразу после устаканивания — не зависит от состояния кнопки дизлайка
     const aiMatch = !!findWholeWordMatch(song.artist.toLowerCase(), aiArtistList);
     updateAIBadge(aiMatch && aiActions.label);
 
@@ -473,6 +490,12 @@ async function init() {
     checkAndSkip();
     scanRowsForBadges();
 
+    const nextBtn = playerBar.querySelector(".next-button");
+    const prevBtn = playerBar.querySelector(".previous-button");
+    [nextBtn, prevBtn].forEach(btn => {
+        if (btn) btn.addEventListener("click", hideBadgeImmediately, true);
+    });
+
     const observer = new MutationObserver(() => {
         checkAndSkip(); 
         if (engineEnabled && !document.getElementById("ytm-ward-controls")) injectButtons();
@@ -484,9 +507,17 @@ async function init() {
     
     const titleNode = document.querySelector("ytmusic-player-bar .title");
     if (titleNode) {
-        new MutationObserver(() => checkAndSkip())
+        new MutationObserver(() => { checkAndSkip(); scheduleBadgeUpdate(); })
             .observe(titleNode, { characterData: true, subtree: true, childList: true });
     }
+
+    const bylineNode = document.querySelector("ytmusic-player-bar .byline");
+    if (bylineNode) {
+        new MutationObserver(() => scheduleBadgeUpdate())
+            .observe(bylineNode, { characterData: true, subtree: true, childList: true });
+    }
+
+    scheduleBadgeUpdate(); // выставить корректное состояние бейджа сразу при инициализации
 }
 
 if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init); } else { init(); }
@@ -508,6 +539,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
             injectButtons();
             checkAndSkip();
             scanRowsForBadges();
+            scheduleBadgeUpdate();
         }
         return;
     }
@@ -520,6 +552,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
             settleTitle = null; // иначе checkAndSkip() решит, что title не менялся, и ничего не запустит
             scheduleScan();
             checkAndSkip();
+            scheduleBadgeUpdate();
         });
         return;
     }
