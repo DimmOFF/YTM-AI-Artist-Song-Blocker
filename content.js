@@ -168,37 +168,6 @@ function handleDislikeAndSkip(song) {
     }
 }
 
-function performDownvoteAndSkip(song) {
-    const dislikeWrapper = document.querySelector(".middle-controls-buttons .dislike") || 
-                           document.querySelector("ytmusic-player-bar .dislike");
-
-    if (!dislikeWrapper) { skipTrack(); return; }
-
-    const actualBtn = dislikeWrapper.querySelector("button") || dislikeWrapper;
-
-    if (isAlreadyDisliked(dislikeWrapper, actualBtn, song)) {
-        if (song) dislikedTracksThisSession.add(trackKey(song));
-        skipTrack();
-        return;
-    }
-
-    simulateClick(actualBtn);
-    if (song) dislikedTracksThisSession.add(trackKey(song));
-
-    let attempts = 0;
-    const poll = setInterval(() => {
-        attempts++;
-        const success = dislikeWrapper.getAttribute("aria-pressed") === "true" || 
-                        actualBtn.getAttribute("aria-pressed") === "true";
-        
-        if (success || attempts >= 20) { 
-            clearInterval(poll);
-            if (success) setTimeout(() => { skipTrack(); }, 2000); 
-            else skipTrack();
-        }
-    }, 100);
-}
-
 function extractArtistOnly(rawByline) {
     return rawByline.split(/\s*•\s*/)[0].trim();
 }
@@ -320,8 +289,6 @@ function scheduleScan() {
     scanTimer = setTimeout(scanRowsForBadges, 300);
 }
 
-// NEW: планирует проверку "Dislike AI and Skip" через ACTION_DELAY_MS.
-// Перед выполнением сверяет, что трек не сменился за время ожидания.
 function scheduleDislikeAndSkipCheck(song) {
     clearTimeout(pendingActionTimer);
     pendingActionTimer = setTimeout(() => {
@@ -335,7 +302,6 @@ function scheduleDislikeAndSkipCheck(song) {
     }, ACTION_DELAY_MS);
 }
 
-// Ручные блокировки — та же 2-секундная защита, что и раньше.
 function scheduleManualBlockCheck(song, matchedTerm) {
     clearTimeout(pendingActionTimer);
     pendingActionTimer = setTimeout(() => {
@@ -345,7 +311,7 @@ function scheduleManualBlockCheck(song, matchedTerm) {
             return;
         }
         console.log(`[YTM Ward] 🛑 BLOCKED (manual list): term="${matchedTerm}" | artist="${current.artist}" | title="${current.title}"`);
-        performDownvoteAndSkip(current);
+        handleDislikeAndSkip(current);
     }, ACTION_DELAY_MS);
 }
 
@@ -563,7 +529,7 @@ async function addToBlockList(term, listName) {
         update[targetList] = list;
         await chrome.storage.local.set(update);
         await updateBlockList();
-        performDownvoteAndSkip(getSongInfo());
+        handleDislikeAndSkip(getSongInfo());
     }
 }
 
