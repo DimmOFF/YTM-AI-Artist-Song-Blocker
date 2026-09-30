@@ -15,7 +15,7 @@ let engineEnabled = true;
 let dislikedTracksThisSession = new Set();
 function trackKey(song) { return `${song.artist}||${song.title}`; }
 
-const ACTION_DELAY_MS = 2000;
+const ACTION_DELAY_MS = 1000;
 let pendingActionTimer = null;
 
 console.log("[YTM Ward] Engine Started. Created by Spirit Flame (spiritflame@tutamail.com)");
@@ -219,7 +219,15 @@ function updateAIBadge(show) {
 }
 
 function getRowArtistElement(row) {
-    return row.querySelector("yt-formatted-string.byline") || row.querySelector(".byline");
+    const byline = row.querySelector("yt-formatted-string.byline") || row.querySelector(".byline");
+    if (byline) return byline;
+
+    const secondaryCol = row.querySelector(".secondary-flex-columns .flex-column");
+    if (secondaryCol) {
+        return secondaryCol.querySelector("yt-formatted-string") || secondaryCol;
+    }
+
+    return null;
 }
 
 function getBadgesContainer(row) {
