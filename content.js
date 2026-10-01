@@ -89,12 +89,12 @@ async function updateBlockList() {
             else rawList = Object.values(data).flat();
 
             remoteArtists = normalizeRemoteArtists(rawList);
-            console.log(`[YTM Ward] ZoundHub: fetch OK, ${remoteArtists.length} имён после нормализации.`);
+            console.log(`[YTM Ward] ZoundHub: fetch OK, ${remoteArtists.length} names after normalization.`);
         } else {
-            console.warn(`[YTM Ward] ZoundHub: fetch вернул ошибку:`, result && result.error);
+            console.warn(`[YTM Ward] ZoundHub: returned an error:`, result && result.error);
         }
     } catch (e) {
-        console.warn("[YTM Ward] ZoundHub: fetch упал с ошибкой:", e);
+        console.warn("[YTM Ward] ZoundHub: failed with an error:", e);
     }
 
     aiArtistList = remoteArtists.map(s => s.toLowerCase());
@@ -150,7 +150,7 @@ function handleDislikeAndSkip(song) {
                            document.querySelector("ytmusic-player-bar .dislike");
 
     if (!dislikeWrapper) {
-        console.log("[YTM Ward] Кнопка Dislike не найдена — выполняю обычный skip.");
+        console.log("[YTM Ward] Dislike button not found — performing a standard skip.");
         skipTrack();
         return;
     }
@@ -158,11 +158,11 @@ function handleDislikeAndSkip(song) {
     const actualBtn = dislikeWrapper.querySelector("button") || dislikeWrapper;
 
     if (isAlreadyDisliked(dislikeWrapper, actualBtn, song)) {
-        console.log("[YTM Ward] Dislike уже нажат — переключаю на следующий трек.");
+        console.log("[YTM Ward] Already hit dislike — switching to the next track.");
         if (song) dislikedTracksThisSession.add(trackKey(song));
         skipTrack();
     } else {
-        console.log("[YTM Ward] Dislike не нажат — нажимаю.");
+        console.log("[YTM Ward] The dislike button hasn't been pressed — pressing it now.");
         simulateClick(actualBtn);
         if (song) dislikedTracksThisSession.add(trackKey(song));
     }
@@ -188,14 +188,15 @@ function getSongInfo() {
 function makeBadgeElement(size /* 'normal' | 'small' */) {
     const badge = document.createElement("span");
     badge.textContent = "AI";
-    badge.title = "Найден в базе ZoundHub как вероятный AI-артист";
+    badge.title = "Found in the ZoundHub database as a likely AI artist";
     const isSmall = size === 'small';
     badge.style.cssText = `
         display: inline-flex; align-items: center; justify-content: center;
         background: #ff2d2d; color: #fff;
         font-size: ${isSmall ? '9px' : '10px'}; font-weight: 800; letter-spacing: 0.5px;
-        border-radius: ${isSmall ? '3px' : '4px'}; padding: ${isSmall ? '1px 5px' : '2px 6px'};
-        height: ${isSmall ? '12px' : '14px'};
+        line-height: 1;
+        border-radius: ${isSmall ? '3px' : '4px'}; 
+        padding: ${isSmall ? '2px 4px' : '3px 6px'}; /* Управляем высотой через паддинги */
         margin-right: ${isSmall ? '6px' : '8px'}; vertical-align: middle; flex-shrink: 0;
     `;
     return badge;
@@ -302,10 +303,10 @@ function scheduleDislikeAndSkipCheck(song) {
     pendingActionTimer = setTimeout(() => {
         const current = getSongInfo();
         if (!current || current.title !== song.title) {
-            console.log(`[YTM Ward] Трек сменился за время задержки — действие для "${song.title}" отменено.`);
+            console.log(`[YTM Ward] Track changed during the delay — action for "${song.title}" cancelled.`);
             return;
         }
-        console.log(`[YTM Ward] 🤖 AI detected (Dislike AI and Skip, после ${ACTION_DELAY_MS}мс) — artist="${current.artist}"`);
+        console.log(`[YTM Ward] 🤖 AI detected (Dislike AI and Skip, после ${ACTION_DELAY_MS}мs) — artist="${current.artist}"`);		 
         handleDislikeAndSkip(current);
     }, ACTION_DELAY_MS);
 }
@@ -315,7 +316,7 @@ function scheduleManualBlockCheck(song, matchedTerm) {
     pendingActionTimer = setTimeout(() => {
         const current = getSongInfo();
         if (!current || current.title !== song.title) {
-            console.log(`[YTM Ward] Трек сменился за время задержки — действие для "${song.title}" отменено.`);
+            console.log(`[YTM Ward] Track changed during the delay — action for "${song.title}" cancelled.`);
             return;
         }
         console.log(`[YTM Ward] 🛑 BLOCKED (manual list): term="${matchedTerm}" | artist="${current.artist}" | title="${current.title}"`);
@@ -382,7 +383,7 @@ function processSettledSong(expectedTitle) {
             scheduleDislikeAndSkipCheck(song);
         } else if (aiActions.skipAi) {
             // "Skip AI" — сразу, без задержки и без дизлайка
-            console.log(`[YTM Ward] 🤖 AI detected (Skip AI, немедленно) — artist="${song.artist}"`);
+            console.log(`[YTM Ward] 🤖 AI detected (Skip AI, instantly) — artist="${song.artist}"`);
             skipTrack();
         }
     }
