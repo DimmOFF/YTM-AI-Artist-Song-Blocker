@@ -8,7 +8,8 @@
   ],
   "host_permissions": [
     "https://music.youtube.com/*",
-    "https://zoundhub.com/*"
+    "https://zoundhub.com/*",
+    "https://api.groq.com/*"
   ],
   "background": {
     "service_worker": "background.js"

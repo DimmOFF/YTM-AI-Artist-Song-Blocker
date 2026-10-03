@@ -10,11 +10,18 @@
     .header-row .version { margin-left: auto; font-size: 10px; color: #666; font-weight: normal; text-transform: none; letter-spacing: 0; }
 
     /* Tabs */
-    .tabs { display: flex; gap: 5px; margin-bottom: 15px; flex-wrap: wrap; }
-    .tab-btn { flex: 1; min-width: 60px; padding: 8px; background: #333; border: none; color: #aaa; cursor: pointer; font-size: 12px; border-radius: 4px; transition: 0.2s; }
+    .tabs { display: flex; gap: 5px; margin-bottom: 15px; }
+    .tab-btn { flex: 1; min-width: 0; padding: 8px 4px; background: #333; border: none; color: #aaa; cursor: pointer; font-size: 11px; border-radius: 4px; transition: 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .tab-btn:hover { background: #444; color: #fff; }
     .tab-btn.active { background: #ff4444; color: white; font-weight: bold; }
-    
+
+    /* Blocklist sub-type radio group (Keywords / Songs / Artists) */
+    .subtype-group { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .subtype-option { display: flex; align-items: center; justify-content: center; gap: 6px; flex: 1; padding: 6px 0; font-size: 12px; color: #aaa; cursor: pointer; transition: 0.2s; }
+    .subtype-option:hover { color: #fff; }
+    .subtype-option input[type="radio"] { width: 14px; height: 14px; accent-color: #ff4444; cursor: pointer; }
+    .subtype-option.active { color: #ff4444; font-weight: bold; }
+
     /* Inputs */
     .input-group { display: flex; gap: 5px; margin-bottom: 10px; }
     input[type="text"] { flex: 1; padding: 8px; background: #2a2a2a; border: 1px solid #444; color: white; border-radius: 4px; outline: none; }
@@ -62,6 +69,38 @@
     
     .status-bar { margin-top: 10px; font-size: 10px; color: #666; text-align: center; font-style: italic; }
     .footer { margin-top: 5px; font-size: 10px; color: #444; text-align: center; }
+
+    /* Info tab */
+    #info-panel { padding: 0 0 5px 0; }
+    .now-playing { text-align: center; margin-bottom: 12px; }
+    .now-playing-label { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+    .now-playing-track { font-size: 14px; font-weight: bold; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .groq-box { background: #222; border: 1px solid #333; border-radius: 4px; padding: 12px; margin-bottom: 15px; font-size: 12px; color: #ccc; line-height: 1.5; }
+    .groq-box .hint { color: #888; font-style: italic; }
+    .groq-loading { display: flex; align-items: center; gap: 8px; color: #888; }
+    .groq-spinner { width: 14px; height: 14px; border: 2px solid #444; border-top-color: #ff4444; border-radius: 50%; animation: ytmWardSpin 0.8s linear infinite; flex-shrink: 0; }
+    @keyframes ytmWardSpin { to { transform: rotate(360deg); } }
+    .groq-verdict-badge { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 4px; margin-bottom: 6px; }
+    .groq-verdict-badge.is-ai { background: #ff2d2d; color: #fff; }
+    .groq-verdict-badge.not-ai { background: #2e7d32; color: #fff; }
+    .groq-ban-btn { margin-top: 10px; width: 100%; padding: 8px; background: #ff2d2d; border: none; color: #fff; font-weight: bold; font-size: 11px; cursor: pointer; border-radius: 4px; }
+    .groq-ban-btn:hover { background: #ff4444; }
+
+    .stats-box { background: #222; border: 1px solid #333; border-radius: 4px; padding: 0 12px; }
+    .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #333; font-size: 12px; }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-label { color: #aaa; }
+    .stat-value { color: #fff; font-weight: bold; }
+
+    /* Groq API key (Settings) */
+    .groq-key-row { display: flex; gap: 5px; margin-bottom: 8px; }
+    .groq-key-row input[type="text"] { font-size: 12px; }
+    .groq-key-saved-text { font-size: 12px; color: #4caf50; flex: 1; display: flex; align-items: center; }
+
+    .cache-size-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; padding-top: 12px; border-top: 1px solid #333; }
+    .cache-size-label { font-size: 12px; color: #aaa; }
+    .cache-size-input { width: 70px; background: #2a2a2a; border: 1px solid #444; color: #fff; border-radius: 4px; padding: 6px 8px; font-size: 12px; text-align: center; }
   </style>
 </head>
 <body>
@@ -75,19 +114,59 @@
   </div>
 
   <div class="tabs">
-    <button class="tab-btn active" data-tab="keywords">Keywords</button>
-    <button class="tab-btn" data-tab="songs">Songs</button>
-    <button class="tab-btn" data-tab="artists">Artists</button>
+    <button class="tab-btn active" data-tab="info">Info</button>
+    <button class="tab-btn" data-tab="blocklist">My Blocklist</button>
     <button class="tab-btn" data-tab="ai">AI DB</button>
     <button class="tab-btn" data-tab="settings">Settings</button>
   </div>
 
-  <div class="input-group" id="input-area">
+  <div id="info-panel" style="display:block;">
+    <div class="now-playing">
+      <div class="now-playing-label">Now Playing</div>
+      <div class="now-playing-track" id="info-track">Nothing is playing</div>
+    </div>
+
+    <div class="groq-box" id="groq-box">
+      <div class="hint">Open YouTube Music to check the current artist.</div>
+    </div>
+
+    <div class="stats-box">
+      <div class="stat-row">
+        <span class="stat-label">Blocked today</span>
+        <span class="stat-value" id="stat-today">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Blocked all-time</span>
+        <span class="stat-value" id="stat-total">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Protecting you since</span>
+        <span class="stat-value" id="stat-since">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="subtype-group" id="subtype-group" style="display:none;">
+    <label class="subtype-option active" data-value="keywords">
+      <input type="radio" name="subtype" value="keywords" checked>
+      <span>Keywords</span>
+    </label>
+    <label class="subtype-option" data-value="songs">
+      <input type="radio" name="subtype" value="songs">
+      <span>Songs</span>
+    </label>
+    <label class="subtype-option" data-value="artists">
+      <input type="radio" name="subtype" value="artists">
+      <span>Artists</span>
+    </label>
+  </div>
+
+  <div class="input-group" id="input-area" style="display:none;">
     <input type="text" id="input" placeholder="Enter keyword...">
     <button id="add">ADD</button>
   </div>
 
-  <ul id="list"></ul>
+  <ul id="list" style="display:none;"></ul>
 
   <div id="settings-panel" style="display:none;">
     <div class="settings-hint">On AI artist detection, apply:</div>
@@ -106,9 +185,26 @@
       <input type="checkbox" id="opt-skip-ai">
       <span>Skip AI</span>
     </label>
+
+    <div class="settings-hint" style="margin-top: 15px;">Groq API key (powers the Artist Info on the Info tab):</div>
+
+    <div class="groq-key-row" id="groq-key-input-row">
+      <input type="text" id="groq-key-input" placeholder="Paste your Groq API key...">
+      <button id="groq-key-save" class="action-btn" style="flex: 0 0 auto; padding: 8px 14px;">Save</button>
+    </div>
+    <div class="groq-key-row" id="groq-key-saved-row" style="display:none;">
+      <span class="groq-key-saved-text">✓ API key saved</span>
+      <button id="groq-key-clear" class="action-btn" style="flex: 0 0 auto; padding: 6px 14px;">Clear API key</button>
+    </div>
+    <button id="groq-key-generate" class="action-btn" style="width: 100%; margin-bottom: 15px;">Generate API Key ↗</button>
+
+    <div id="cache-size-row" class="cache-size-row" style="display:none;">
+      <label for="cache-size-input" class="cache-size-label">Artist cache size</label>
+      <input type="number" id="cache-size-input" class="cache-size-input" min="10" max="2000" step="10" value="100">
+    </div>
   </div>
 
-  <div class="actions" id="actions-row">
+  <div class="actions" id="actions-row" style="display:none;">
     <button class="action-btn" id="btn-refresh">↻ Reload DB</button>
     <button class="action-btn" id="btn-export">⬇ Export JSON</button>
     <button class="action-btn" id="btn-import">⬆ Import JSON</button>
