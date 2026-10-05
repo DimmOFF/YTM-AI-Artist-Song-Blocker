@@ -1,6 +1,7 @@
 # YTM-AI-Artist-Song-Blocker
 A chrome extension that automatically blocks AI artists in YouTube Music and allows you to manually block artists, songs and keywords.
 
+[![Support](https://img.shields.io/badge/❤️-Support%20the%20Project-red?style=for-the-badge)](./DONATE.md)
 # YTM Artist & Song Blocker
 
 [![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue)](https://developer.chrome.com/docs/extensions/mv3/intro/)
