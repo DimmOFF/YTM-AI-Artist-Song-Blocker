@@ -48,13 +48,13 @@ The easiest way to say thanks — a coffee keeps the commits coming!
   </tr>
   <tr>
     <td align="center">
-      <img src="https://raw.githubusercontent.com/DimmOFF/DMF-Assets/main/donate/crypto/qr-eth.png" width="180" alt="ETH ERC-20 QR code" />
+      <img src="https://raw.githubusercontent.com/DimmOFF/DMF-Assets/main/donation/crypto/qr-eth.png" width="180" alt="ETH ERC-20 QR code" />
     </td>
     <td align="center">
-      <img src="https://raw.githubusercontent.com/DimmOFF/DMF-Assets/main/donate/crypto/qr-trx.png" width="180" alt="TRX TRC-20 QR code" />
+      <img src="https://raw.githubusercontent.com/DimmOFF/DMF-Assets/main/donation/crypto/qr-trx.png" width="180" alt="TRX TRC-20 QR code" />
     </td>
     <td align="center">
-      <img src="https://raw.githubusercontent.com/DimmOFF/DMF-Assets/main/donate/crypto/qr-bep20.png" width="180" alt="BEP-20 QR code" />
+      <img src="https://raw.githubusercontent.com/DimmOFF/DMF-Assets/main/donation/crypto/qr-bep20.png" width="180" alt="BEP-20 QR code" />
     </td>
   </tr>
 </table>
