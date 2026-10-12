@@ -3,6 +3,9 @@
  * Created by Spirit Flame modified by DimmOFF
  */
 
+// Версия берётся из manifest.json — вручную в popup.html её больше править не нужно
+document.getElementById('version').textContent = 'v' + chrome.runtime.getManifest().version;
+
 // DOM Elements
 const tabs = document.querySelectorAll('.tab-btn');
 const list = document.getElementById('list');

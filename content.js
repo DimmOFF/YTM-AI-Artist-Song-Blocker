@@ -209,15 +209,14 @@ function getSongInfo() {
 function makeBadgeElement(size /* 'normal' | 'small' */) {
     const badge = document.createElement("span");
     badge.textContent = "AI";
-    badge.title = "Found in the ZoundHub database as a likely AI artist";
+    badge.title = "Найден в базе ZoundHub как вероятный AI-артист";
     const isSmall = size === 'small';
     badge.style.cssText = `
         display: inline-flex; align-items: center; justify-content: center;
         background: #ff2d2d; color: #fff;
         font-size: ${isSmall ? '9px' : '10px'}; font-weight: 800; letter-spacing: 0.5px;
-        line-height: 1;
-        border-radius: ${isSmall ? '3px' : '4px'}; 
-        padding: ${isSmall ? '2px 4px' : '3px 6px'}; /* Управляем высотой через паддинги */
+        border-radius: ${isSmall ? '3px' : '4px'}; padding: ${isSmall ? '1px 5px' : '2px 6px'};
+        height: ${isSmall ? '12px' : '14px'};
         margin-right: ${isSmall ? '6px' : '8px'}; vertical-align: middle; flex-shrink: 0;
     `;
     return badge;
@@ -392,8 +391,129 @@ function hideBadgeImmediately() {
     updateAIBadge(false);
 }
 
+// ===== «Назад» пропускает треки, которые расширение само бы скипнуло =====
+// Проблема: на 5-м треке жмём «назад» → YTM включает 4-й (AI) → расширение его
+// скипает вперёд → снова играет 5-й. Теперь после пользовательского клика по
+// «назад» мы сами листаем назад, пока не встретим трек, который расширение
+// не стало бы скипать (не AI / не в ручном бане), и останавливаемся на нём.
+const BACK_SETTLE_MS = 700;      // ждём, пока title и byline нового трека обновятся согласованно
+const BACK_TITLE_WAIT_MS = 3000; // сколько ждём смены трека после клика «назад»
+const BACK_MAX_STEPS = 100;      // предохранитель от бесконечного цикла
+let backSeekActive = false;
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Резолвит новый song, как только title отличается от prevTitle; null — если не дождались.
+function waitForTitleChange(prevTitle, timeoutMs) {
+    return new Promise(resolve => {
+        const started = Date.now();
+        const tick = () => {
+            const s = getSongInfo();
+            if (s && s.title && s.title !== prevTitle) return resolve(s);
+            if (Date.now() - started >= timeoutMs) return resolve(null);
+            setTimeout(tick, 100);
+        };
+        tick();
+    });
+}
+
+// Скипнуло бы расширение этот трек само? (ручной бан, либо AI при включённых
+// Dislike AI and Skip / Skip AI). Если действия выключены — «назад» работает как обычно.
+function wouldAutoHandle(song) {
+    const checkString = (song.artist + " " + song.title).toLowerCase();
+    if (findWholeWordMatch(checkString, blockList)) return true;
+    const aiMatch = findWholeWordMatch(song.artist.toLowerCase(), aiArtistList);
+    return !!aiMatch && (aiActions.dislike || aiActions.skipAi);
+}
+
+async function backSeekFlow(originSong) {
+    backSeekActive = true;
+    clearTimeout(settleTimer);
+    clearTimeout(pendingActionTimer);
+
+    let moved = false;
+    let wasMuted = null;
+    try {
+        const first = await waitForTitleChange(originSong.title, BACK_TITLE_WAIT_MS);
+        // Title не изменился — YTM просто перемотал текущий трек в начало
+        // (так он делает, если играло больше ~3 сек). Это не переход назад.
+        if (!first) return;
+        moved = true;
+
+        // Глушим звук на время перемотки, чтобы AI-треки не проигрывались вслух
+        const video = document.querySelector("video");
+        if (video) { wasMuted = video.muted; video.muted = true; }
+
+        for (let step = 0; step < BACK_MAX_STEPS; step++) {
+            await sleep(BACK_SETTLE_MS);
+            const song = getSongInfo();
+            if (!song) break;
+
+            if (!wouldAutoHandle(song)) {
+                console.log(`[YTM Ward] ⏮ Back: stopped at "${song.artist} — ${song.title}"`);
+                break;
+            }
+
+            const prevBtn = document.querySelector("ytmusic-player-bar .previous-button");
+            if (!prevBtn) break;
+            console.log(`[YTM Ward] ⏮ Back: "${song.artist} — ${song.title}" would be skipped — going back further.`);
+            hideBadgeImmediately();
+            simulateClick(prevBtn);
+
+            const next = await waitForTitleChange(song.title, BACK_TITLE_WAIT_MS);
+            if (!next) {
+                // Дошли до начала очереди — дальше назад некуда. Обычная логика
+                // ниже сама прогонит этот трек (и следующие AI) вперёд.
+                console.log("[YTM Ward] ⏮ Back: reached the start of the queue.");
+                break;
+            }
+        }
+    } finally {
+        if (wasMuted !== null) {
+            const v = document.querySelector("video");
+            if (v) v.muted = wasMuted;
+        }
+        backSeekActive = false;
+        if (moved) {
+            // Отдаём итоговый трек обычной логике (плашка и т.д.)
+            lastProcessedSong = "";
+            settleTitle = null;
+            checkAndSkip();
+            scheduleBadgeUpdate();
+        }
+    }
+}
+
+// Общая точка входа: запоминаем текущий трек ДО того, как YTM переключится, и запускаем перемотку.
+function triggerBackSeek() {
+    if (!engineEnabled || backSeekActive) return;
+    const origin = getSongInfo();
+    if (origin) backSeekFlow(origin);
+}
+
+// 1) Клик мышью по «назад». Только настоящие клики (isTrusted) — свои simulateClick из цикла выше игнорируем.
+function onPlayerBarClick(e) {
+    if (!e.isTrusted) return;
+    if (!e.target.closest || !e.target.closest(".previous-button")) return;
+    triggerBackSeek();
+}
+
+// 2) Горячая клавиша YTM «предыдущий трек» — Shift+P. По e.code, чтобы работало
+// и на русской раскладке. В полях ввода (поиск и т.п.) не реагируем.
+function onGlobalKeyDown(e) {
+    if (!e.isTrusted || e.repeat) return;
+    if (e.code !== "KeyP" || !e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+    const t = (e.composedPath && e.composedPath()[0]) || e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    triggerBackSeek();
+}
+
+// 3) Медиа-клавиши и кнопки гарнитуры — событие шлёт mediasession-hook.js (MAIN world).
+document.addEventListener("ytm-ward:prev-media", triggerBackSeek);
+
+
 function checkAndSkip() {
-    if (!engineEnabled) return;
+    if (!engineEnabled || backSeekActive) return;
 
     const song = getSongInfo();
     if (!song) return;
@@ -406,6 +526,7 @@ function checkAndSkip() {
 }
 
 function processSettledSong(expectedTitle) {
+    if (backSeekActive) return;
     const song = getSongInfo();
     if (!song || song.title !== expectedTitle) return;
 
@@ -606,6 +727,9 @@ async function init() {
     [nextBtn, prevBtn].forEach(btn => {
         if (btn) btn.addEventListener("click", hideBadgeImmediately, true);
     });
+    // Делегирование на весь player bar — не теряется, если YTM перерисует саму кнопку
+    playerBar.addEventListener("click", onPlayerBarClick, true);
+    document.addEventListener("keydown", onGlobalKeyDown, true);
 
     const observer = new MutationObserver(() => {
         checkAndSkip(); 
