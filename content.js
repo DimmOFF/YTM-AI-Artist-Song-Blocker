@@ -213,11 +213,14 @@ function makeBadgeElement(size /* 'normal' | 'small' */) {
     const isSmall = size === 'small';
     badge.style.cssText = `
         display: inline-flex; align-items: center; justify-content: center;
+        align-self: center; flex-shrink: 0;
+        box-sizing: border-box; line-height: 1; white-space: nowrap; user-select: none;
         background: #ff2d2d; color: #fff;
         font-size: ${isSmall ? '9px' : '10px'}; font-weight: 800; letter-spacing: 0.5px;
-        border-radius: ${isSmall ? '3px' : '4px'}; padding: ${isSmall ? '1px 5px' : '2px 6px'};
-        height: ${isSmall ? '12px' : '14px'};
-        margin-right: ${isSmall ? '6px' : '8px'}; vertical-align: middle; flex-shrink: 0;
+        border-radius: ${isSmall ? '3px' : '4px'}; padding: 0 ${isSmall ? '5px' : '6px'};
+        height: ${isSmall ? '14px' : '16px'};
+        margin: 0 ${isSmall ? '6px' : '8px'} 0 0; vertical-align: middle;
+        position: relative; top: -1px;
     `;
     return badge;
 }
@@ -232,7 +235,7 @@ function updateAIBadge(show) {
         if (!badge) {
             badge = makeBadgeElement('normal');
             badge.id = "ytm-ward-ai-badge";
-            bylineEl.insertAdjacentElement('beforebegin', badge);
+            bylineEl.prepend(badge);
         }
     } else if (badge) {
         badge.remove();
@@ -292,7 +295,7 @@ function scanRowsForBadges() {
             if (badgesContainer) {
                 badgesContainer.appendChild(badge);
             } else {
-                bylineEl.insertAdjacentElement('beforebegin', badge);
+                bylineEl.prepend(badge);
             }
         } else if (!shouldShow && badge) {
             badge.remove();
