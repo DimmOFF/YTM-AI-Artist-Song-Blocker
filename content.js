@@ -187,12 +187,23 @@ function extractArtistOnly(rawByline) {
     return rawByline.split(/\s*•\s*/)[0].trim();
 }
 
+function getBylineText(bylineEl) {
+    // Бейдж "AI" лежит ВНУТРИ byline (prepend) — его текст "AI" нельзя
+    // учитывать при распознавании артиста, иначе artist станет "AI<name>",
+    // мэтч пропадёт, бейдж снимется, мэтч вернётся... = мигание.
+    const badge = bylineEl.querySelector("#ytm-ward-ai-badge");
+    if (!badge) return bylineEl.textContent.trim();
+    const clone = bylineEl.cloneNode(true);
+    clone.querySelector("#ytm-ward-ai-badge")?.remove();
+    return clone.textContent.trim();
+}
+
 function getSongInfo() {
     const titleEl = document.querySelector("ytmusic-player-bar .title");
     const bylineEl = document.querySelector("ytmusic-player-bar .byline");
     if (!titleEl || !bylineEl) return null;
 
-    const rawByline = bylineEl.textContent.trim();
+    const rawByline = getBylineText(bylineEl);
     const video = document.querySelector("video");
 
     return {
@@ -270,9 +281,15 @@ function scanRowsForBadges() {
         if (!bylineEl) return;
 
         const artistLinks = Array.from(bylineEl.querySelectorAll("a"));
-        const artistText = artistLinks.length
-            ? artistLinks.map(a => a.textContent.trim()).join(", ")
-            : extractArtistOnly(bylineEl.textContent.trim());
+        let artistText;
+        if (artistLinks.length) {
+            artistText = artistLinks.map(a => a.textContent.trim()).join(", ");
+        } else {
+            // Тот же фикс, что в плеере: текст бейджа не должен попадать в artistText
+            const clone = bylineEl.cloneNode(true);
+            clone.querySelector(".ytm-ward-row-ai-badge")?.remove();
+            artistText = extractArtistOnly(clone.textContent.trim());
+        }
         if (!artistText) return;
 
         let isAI;
@@ -352,7 +369,7 @@ const SETTLE_DELAY_MS = 1000;
 let settleTimer = null;
 let settleTitle = null;
 
-const BADGE_SETTLE_MS = 60;
+const BADGE_SETTLE_MS = 250;
 let badgeTimer = null;
 
 function scheduleBadgeUpdate() {
@@ -728,7 +745,10 @@ async function init() {
     const nextBtn = playerBar.querySelector(".next-button");
     const prevBtn = playerBar.querySelector(".previous-button");
     [nextBtn, prevBtn].forEach(btn => {
-        if (btn) btn.addEventListener("click", hideBadgeImmediately, true);
+        // Было hideBadgeImmediately: на каждый клик next/prev бейдж снимался
+        // сразу, а через ~60мс ставился обратно = гарантированный блик.
+        // Теперь просто ждём settle (250мс) и один раз выставляем итог.
+        if (btn) btn.addEventListener("click", scheduleBadgeUpdate, true);
     });
     // Делегирование на весь player bar — не теряется, если YTM перерисует саму кнопку
     playerBar.addEventListener("click", onPlayerBarClick, true);
@@ -751,7 +771,20 @@ async function init() {
 
     const bylineNode = document.querySelector("ytmusic-player-bar .byline");
     if (bylineNode) {
-        new MutationObserver(() => scheduleBadgeUpdate())
+        // Игнорируем собственные мутации бейджа (prepend/remove внутри byline),
+        // иначе каждая наша вставка перезапускала бы scheduleBadgeUpdate = цикл/мигание.
+        new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                for (const n of m.addedNodes) {
+                    if (n.nodeType === 1 && (n.id === "ytm-ward-ai-badge" || n.querySelector?.("#ytm-ward-ai-badge"))) return;
+                }
+                for (const n of m.removedNodes) {
+                    if (n.nodeType === 1 && (n.id === "ytm-ward-ai-badge" || n.querySelector?.("#ytm-ward-ai-badge"))) return;
+                }
+                if (m.target?.id === "ytm-ward-ai-badge") return;
+            }
+            scheduleBadgeUpdate();
+        })
             .observe(bylineNode, { characterData: true, subtree: true, childList: true });
     }
 
