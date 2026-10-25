@@ -16,6 +16,43 @@ let whitelistKeywords = [];
 let whitelistTracks = new Set(); // названия треков (lower-case) — сравниваются точно, а не «по слову»
 const WL_KEYS = ['whitelistedArtists', 'whitelistedKeywords', 'whitelistedTracks'];
 const BL_KEYS = ['blockedArtists', 'blockedKeywords', 'blockedTracks'];
+// Трек, который SoundProof признал AI по правилам автоскипа (порог перевеса + минимум голосов).
+// Нужен, чтобы бейдж и «назад» учитывали решение и после повторных пересчётов.
+let soundproofFlag = null; // { artist, title }
+function isSoundproofFlagged(song) {
+    return !!soundproofFlag && !!song && soundproofFlag.title === song.title && soundproofFlag.artist === song.artist;
+}
+
+// Правила SoundProof для автоскипа (собственная реализация по описанию их поведения):
+//  • голосов нет или меньше минимума — не пропускаем;
+//  • проверенный модератором артист считается «практически стопроцентным»;
+//  • перевес = (AI − Human) / все голоса; пропускаем, если победили AI и перевес ≥ порога.
+// Порог и минимум голосов настраиваются в карточке SoundProof на вкладке AI DB.
+async function checkSoundproof(artist) {
+    try {
+        const st = await chrome.storage.local.get(['sourceEnabled', 'soundproofThreshold', 'soundproofMinVotes']);
+        if (st.sourceEnabled && st.sourceEnabled.soundproof === false) return { skip: false };
+
+        const threshold = Number.isFinite(st.soundproofThreshold) ? st.soundproofThreshold : 50;
+        const minVotes = Number.isFinite(st.soundproofMinVotes) ? st.soundproofMinVotes : 3;
+
+        const res = await chrome.runtime.sendMessage({ type: 'GET_SOUNDPROOF', artist });
+        if (!res || !res.ok) return { skip: false };
+
+        let { ai, human, verified } = res.data;
+        if (verified) {
+            if (ai > human) ai = 10000000; else human = 10000000;
+        }
+        const total = ai + human;
+        if (total === 0 || total < minVotes || ai <= human) return { skip: false, ai, human };
+
+        const lead = Math.round(((ai - human) / total) * 100);
+        return { skip: lead >= threshold, lead, ai, human, threshold };
+    } catch (e) {
+        return { skip: false }; // сеть/перезагрузка расширения — просто не вмешиваемся
+    }
+}
+
 let lastProcessedSong = ""; 
 
 const DEFAULT_AI_ACTIONS = { label: true, dislike: true, skipAi: false };
@@ -731,7 +768,7 @@ function scheduleBadgeUpdate() {
     badgeTimer = setTimeout(() => {
         const song = getSongInfo();
         if (!song) return;
-        const aiMatch = !!findWholeWordMatch(song.artist.toLowerCase(), aiArtistList);
+        const aiMatch = !!findWholeWordMatch(song.artist.toLowerCase(), aiArtistList) || isSoundproofFlagged(song);
         const whitelisted = isWhitelistedSong(song);
         updateAIBadge(aiMatch && aiActions.label, whitelisted);
 
@@ -798,7 +835,7 @@ function wouldAutoHandle(song) {
     if (isWhitelistedSong(song)) return false; // Whitelist главнее любых блокировок
     const checkString = (song.artist + " " + song.title).toLowerCase();
     if (findWholeWordMatch(checkString, blockList)) return true;
-    const aiMatch = findWholeWordMatch(song.artist.toLowerCase(), aiArtistList);
+    const aiMatch = findWholeWordMatch(song.artist.toLowerCase(), aiArtistList) || isSoundproofFlagged(song);
     return !!aiMatch && (aiActions.dislike || aiActions.skipAi);
 }
 
@@ -901,12 +938,12 @@ function checkAndSkip() {
     }
 }
 
-function processSettledSong(expectedTitle) {
+async function processSettledSong(expectedTitle) {
     if (backSeekActive) return;
     const song = getSongInfo();
     if (!song || song.title !== expectedTitle) return;
 
-    const aiMatch = !!findWholeWordMatch(song.artist.toLowerCase(), aiArtistList);
+    let aiMatch = !!findWholeWordMatch(song.artist.toLowerCase(), aiArtistList) || isSoundproofFlagged(song);
     const whitelisted = isWhitelistedSong(song);
     updateAIBadge(aiMatch && aiActions.label, whitelisted);
 
@@ -922,6 +959,23 @@ function processSettledSong(expectedTitle) {
     if (manualTerm) {
         scheduleManualBlockCheck(song, manualTerm);
         return;
+    }
+
+    // Второй источник: голоса SoundProof. Спрашиваем, только если ZoundHub артиста не знает
+    // и расширение вообще что-то делает с AI-треками (метка или скип).
+    if (!aiMatch && (aiActions.label || aiActions.dislike || aiActions.skipAi)) {
+        const verdict = await checkSoundproof(song.artist);
+
+        // Пока ждали ответ, трек мог смениться (или началось «назад») — тогда решение устарело.
+        const now = getSongInfo();
+        if (backSeekActive || !now || now.title !== song.title) return;
+
+        if (verdict.skip) {
+            soundproofFlag = { artist: song.artist, title: song.title };
+            aiMatch = true;
+            updateAIBadge(aiActions.label, false);
+            console.log(`[YTM Ward] 🗳️ SoundProof: AI by community votes — artist="${song.artist}" (${verdict.ai} AI vs ${verdict.human} Human, lead ${verdict.lead}% ≥ ${verdict.threshold}%)`);
+        }
     }
 
     if (aiMatch) {
@@ -1235,6 +1289,20 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     // список и сбрасываем кэш «уже проверено» у строк и текущего трека.
     const prevZ = !(changes.sourceEnabled && changes.sourceEnabled.oldValue && changes.sourceEnabled.oldValue.zoundhub === false);
     const nextZ = !(changes.sourceEnabled && changes.sourceEnabled.newValue && changes.sourceEnabled.newValue.zoundhub === false);
+    // Источник SoundProof включили/выключили или поменяли правила скипа — пересчитываем текущий трек.
+    const prevS = !(changes.sourceEnabled && changes.sourceEnabled.oldValue && changes.sourceEnabled.oldValue.soundproof === false);
+    const nextS = !(changes.sourceEnabled && changes.sourceEnabled.newValue && changes.sourceEnabled.newValue.soundproof === false);
+    if ((changes.sourceEnabled && prevS !== nextS) || changes.soundproofThreshold || changes.soundproofMinVotes) {
+        soundproofFlag = null;
+        clearTimeout(pendingActionTimer);
+        updateAIBadge(false);
+        lastProcessedSong = "";
+        settleTimer && clearTimeout(settleTimer);
+        settleTitle = null;
+        checkAndSkip();
+        scheduleBadgeUpdate();
+    }
+
     if (changes.sourceEnabled && prevZ !== nextZ) {
         updateBlockList().then(() => {
             document.querySelectorAll('[data-ytmward-checked]').forEach(el => { delete el.dataset.ytmwardChecked; delete el.dataset.ytmwardAi; });

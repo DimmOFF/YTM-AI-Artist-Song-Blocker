@@ -706,7 +706,7 @@ const SOURCES = [
         id: 'soundproof',
         pill: 'SoundProof',
         name: 'Detect & Skip AI Music - SoundProof',
-        desc: 'Community votes per artist (read-only). Shown on the Info tab.'
+        desc: 'Community votes per artist. Shown on the Info tab and checked at track start (badge / auto-skip).'
     }
 ];
 
@@ -848,6 +848,29 @@ async function renderSourcesPanel() {
                 loadSoundproofStat(statEl);
             };
             card.querySelector('.source-main').appendChild(row);
+
+            // Правила автоскипа по голосам (по умолчанию 50% и 3 голоса)
+            const rules = document.createElement('div');
+            rules.className = 'source-ttl-row';
+            rules.title = 'Lead = (AI votes − Human votes) / all votes. A 50% lead equals 75% AI votes. Verified artists always count as decisive.';
+            rules.innerHTML = '<span>Auto-skip: AI lead ≥</span><input type="number" min="1" max="100" step="1" data-k="threshold"><span>% · min votes</span><input type="number" min="1" max="999" step="1" data-k="minVotes">';
+            const thInput = rules.querySelector('[data-k="threshold"]');
+            const mvInput = rules.querySelector('[data-k="minVotes"]');
+            chrome.storage.local.get(['soundproofThreshold', 'soundproofMinVotes']).then(d => {
+                thInput.value = Number.isFinite(d.soundproofThreshold) ? d.soundproofThreshold : 50;
+                mvInput.value = Number.isFinite(d.soundproofMinVotes) ? d.soundproofMinVotes : 3;
+            });
+            const clampSave = (input, key, min, max, fallback) => {
+                let v = Math.round(Number(input.value));
+                if (!Number.isFinite(v)) v = fallback;
+                v = Math.min(max, Math.max(min, v));
+                input.value = v;
+                chrome.storage.local.set({ [key]: v });
+                showStatus('SoundProof: skip rule saved', '#4caf50');
+            };
+            thInput.onchange = () => clampSave(thInput, 'soundproofThreshold', 1, 100, 50);
+            mvInput.onchange = () => clampSave(mvInput, 'soundproofMinVotes', 1, 999, 3);
+            card.querySelector('.source-main').appendChild(rules);
         }
 
         sourcesPanel.appendChild(card);

@@ -440,6 +440,48 @@ async function castSoundproofVote(artist, type) {
     }
 }
 
+// Статус SoundProof с кэшем (тот же кэш и тот же срок жизни, что на вкладке Info,
+// поэтому проверка при старте трека и карточка Info не делают лишних запросов).
+const SP_CACHE_DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 1D
+
+async function getSoundproofCached(artist) {
+    const key = String(artist).toLowerCase().trim();
+    const stored = await chrome.storage.local.get(['soundproofCache', 'soundproofCacheTtl']);
+    const ttl = (typeof stored.soundproofCacheTtl === 'number' && stored.soundproofCacheTtl >= 0)
+        ? stored.soundproofCacheTtl : SP_CACHE_DEFAULT_TTL_MS;
+
+    if (ttl > 0) {
+        const entry = (stored.soundproofCache || {})[key];
+        if (entry && Date.now() - entry.checkedAt < ttl) return entry.data;
+    }
+
+    let data = await fetchSoundproofStatus(artist);
+
+    // «A, B» — ключом у SoundProof служит первый исполнитель
+    if (data.human + data.ai === 0 && String(artist).includes(',')) {
+        const first = String(artist).split(/\s*,\s*/)[0];
+        if (first && first.toLowerCase() !== key) {
+            try {
+                const d2 = await fetchSoundproofStatus(first);
+                if (d2.human + d2.ai > 0) data = d2;
+            } catch (e) { /* оставляем исходный ответ */ }
+        }
+    }
+
+    if (ttl > 0) {
+        const fresh = await chrome.storage.local.get(['soundproofCache']);
+        const cache = fresh.soundproofCache || {};
+        cache[key] = { data, checkedAt: Date.now() };
+        const keys = Object.keys(cache);
+        if (keys.length > 500) {
+            keys.sort((x, y) => cache[x].checkedAt - cache[y].checkedAt);
+            for (let i = 0; i < keys.length - 500; i++) delete cache[keys[i]];
+        }
+        await chrome.storage.local.set({ soundproofCache: cache });
+    }
+    return data;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message && message.type === 'FETCH_AI_ARTISTS') {
         fetchArtists()
@@ -450,6 +492,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message && message.type === 'FETCH_SOUNDPROOF') {
         fetchSoundproofStatus(message.artist)
+            .then(data => sendResponse({ ok: true, data }))
+            .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
+        return true;
+    }
+
+    if (message && message.type === 'GET_SOUNDPROOF') {
+        getSoundproofCached(message.artist)
             .then(data => sendResponse({ ok: true, data }))
             .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
         return true;
