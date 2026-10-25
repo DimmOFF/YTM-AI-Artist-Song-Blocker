@@ -22,6 +22,8 @@ const actionsRow = document.getElementById('actions-row');
 const subtypeGroup = document.getElementById('subtype-group');
 const subtypeRadios = document.querySelectorAll('input[name="subtype"]');
 const subtypeOptions = document.querySelectorAll('.subtype-option');
+const modeGroup = document.getElementById('mode-group');
+const modeBtns = document.querySelectorAll('.mode-btn');
 
 // Settings tab elements
 const settingsPanel = document.getElementById('settings-panel');
@@ -57,13 +59,31 @@ const engineToggle = document.getElementById('engine-toggle');
 const DEFAULT_AI_ACTIONS = { label: true, dislike: false, skipAi: true };
 
 let currentTab = 'info';
-let currentSubType = 'keywords'; // keywords | songs | artists — выбирается радиокнопками внутри вкладки My Blocklist
+let currentMode = 'block';       // block | white — переключатель Blocklist / Whitelist внутри вкладки My List
+let currentSubType = 'keywords'; // keywords | songs | artists — выбирается радиокнопками внутри вкладки My List
 
-const KEYS = {
-    keywords: 'blockedKeywords',
-    songs: 'blockedTracks',
-    artists: 'blockedArtists'
+const KEYS_BY_MODE = {
+    block: {
+        keywords: 'blockedKeywords',
+        songs: 'blockedTracks',
+        artists: 'blockedArtists'
+    },
+    white: {
+        keywords: 'whitelistedKeywords',
+        songs: 'whitelistedTracks',
+        artists: 'whitelistedArtists'
+    }
 };
+const BL_KEYS = Object.values(KEYS_BY_MODE.block);
+const WL_KEYS = Object.values(KEYS_BY_MODE.white);
+
+function currentKey() {
+    return KEYS_BY_MODE[currentMode][currentSubType];
+}
+
+function updatePlaceholder() {
+    input.placeholder = `Add to ${currentMode === 'white' ? 'whitelist' : 'blocklist'} (${currentSubType})...`;
+}
 
 // --- UTILS ---
 
@@ -78,6 +98,32 @@ function getDisplayText(item) {
     if (typeof item === 'string') return item;
     if (item && item.title) return `${item.artist || 'Unknown'} - ${item.title}`;
     return JSON.stringify(item);
+}
+
+// Текст записи для сравнения: у трека — title (так же матчится в content.js), иначе сама строка.
+function termText(item) {
+    const v = (item && typeof item === 'object') ? item.title : item;
+    return typeof v === 'string' ? v.trim().toLowerCase() : '';
+}
+
+// Удаляет из указанных списков записи с таким же текстом (без учёта регистра).
+// Blocklist и Whitelist не должны содержать одну и ту же запись одновременно.
+async function removeFromLists(keys, text) {
+    const target = String(text || '').trim().toLowerCase();
+    if (!target) return 0;
+    const data = await chrome.storage.local.get(keys);
+    const update = {};
+    let removed = 0;
+    keys.forEach(key => {
+        const items = data[key] || [];
+        const kept = items.filter(i => termText(i) !== target);
+        if (kept.length !== items.length) {
+            update[key] = kept;
+            removed += items.length - kept.length;
+        }
+    });
+    if (removed) await chrome.storage.local.set(update);
+    return removed;
 }
 
 function safeSort(items) {
@@ -273,7 +319,8 @@ function render() {
     list.style.display = '';
     sourcesPanel.style.display = 'none';
     inputArea.style.display = 'none';
-    subtypeGroup.style.display = 'none'; // радиокнопки Keywords/Songs/Artists показываем только на My Blocklist
+    subtypeGroup.style.display = 'none'; // радиокнопки Keywords/Songs/Artists показываем только на My List
+    modeGroup.style.display = 'none';    // переключатель Blocklist/Whitelist — тоже только на My List
     actionsRow.style.display = 'flex'; // по умолчанию видим, скрываем только на Settings
 
     if (currentTab === 'settings') {
@@ -300,10 +347,11 @@ function render() {
         return;
     }
 
-    // currentTab === 'blocklist'
+    // currentTab === 'mylist'
+    modeGroup.style.display = 'flex';
     subtypeGroup.style.display = 'flex';
     inputArea.style.display = 'flex';
-    const key = KEYS[currentSubType];
+    const key = currentKey();
     
     chrome.storage.local.get([key], (res) => {
         let items = res[key] || [];
@@ -371,7 +419,8 @@ function banArtistFromInfo(artist, btn) {
         }
 
         items.push(artist);
-        chrome.storage.local.set({ blockedArtists: items }, () => {
+        chrome.storage.local.set({ blockedArtists: items }, async () => {
+            await removeFromLists(WL_KEYS, artist); // бан и Whitelist взаимоисключающие
             showStatus(`"${artist}" added to blocklist.`, '#4caf50');
             if (btn) { btn.disabled = true; btn.textContent = '✓ Banned'; }
         });
@@ -921,7 +970,8 @@ function addItem() {
     const val = input.value.trim();
     if (!val) return;
     
-    const key = KEYS[currentSubType];
+    const key = currentKey();
+    const mode = currentMode;
     chrome.storage.local.get([key], (res) => {
         const items = res[key] || [];
         
@@ -933,10 +983,17 @@ function addItem() {
         
         if (!exists) {
             items.push(newItem);
-            chrome.storage.local.set({ [key]: items }, () => {
+            chrome.storage.local.set({ [key]: items }, async () => {
+                // Whitelist ↔ Blocklist: запись не может быть в обоих списках сразу,
+                // поэтому такая же запись удаляется из противоположного списка.
+                const removed = await removeFromLists(mode === 'white' ? BL_KEYS : WL_KEYS, termText(newItem));
                 input.value = '';
                 render();
-                showStatus('Added.');
+                if (removed) {
+                    showStatus(mode === 'white' ? 'Added. Removed from blocklist.' : 'Added. Removed from whitelist.', '#4caf50');
+                } else {
+                    showStatus('Added.');
+                }
             });
         } else {
             showStatus('Duplicate entry.', '#ff4444');
@@ -960,7 +1017,7 @@ tabs.forEach(tab => {
         tab.classList.add('active');
         currentTab = tab.dataset.tab;
         input.value = '';
-        input.placeholder = `Add to ${currentSubType}...`;
+        updatePlaceholder();
         render();
     };
 });
@@ -971,7 +1028,18 @@ subtypeRadios.forEach(radio => {
         currentSubType = radio.value;
         subtypeOptions.forEach(opt => opt.classList.toggle('active', opt.dataset.value === currentSubType));
         input.value = '';
-        input.placeholder = `Add to ${currentSubType}...`;
+        updatePlaceholder();
+        render();
+    });
+});
+
+modeBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+        currentMode = btn.dataset.mode;
+        modeBtns.forEach(b => b.classList.toggle('active', b === btn));
+        document.body.classList.toggle('mode-white', currentMode === 'white');
+        input.value = '';
+        updatePlaceholder();
         render();
     });
 });
@@ -1020,8 +1088,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (currentTab === 'info' && (changes.nowPlaying || changes.stats)) {
         renderInfoTab();
     }
+    // Список изменили снаружи (например, кликом по AI-бейджу на странице) — обновляем открытый My List
+    if (currentTab === 'mylist' && [...BL_KEYS, ...WL_KEYS].some(k => changes[k])) {
+        render();
+    }
 });
 
 // Start
+updatePlaceholder();
 render();
 loadEngineToggle();

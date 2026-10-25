@@ -5,6 +5,15 @@
 
 let blockList = [];
 let aiArtistList = [];
+// lower-case имя из базы → имя в оригинальном регистре (для записи в Whitelist)
+let aiArtistNames = new Map();
+
+// Whitelist: whitelist — все записи (артисты + ключевые слова + треки), whitelistArtists — только артисты
+// (по ним судим о строках в списках, где нам известен лишь артист).
+let whitelist = [];
+let whitelistArtists = [];
+const WL_KEYS = ['whitelistedArtists', 'whitelistedKeywords', 'whitelistedTracks'];
+const BL_KEYS = ['blockedArtists', 'blockedKeywords', 'blockedTracks'];
 let lastProcessedSong = ""; 
 
 const DEFAULT_AI_ACTIONS = { label: true, dislike: true, skipAi: false };
@@ -79,6 +88,111 @@ function rebuildManualBlockList(localArtists, localKeywords, localTracks) {
         .sort();
 }
 
+// Текст записи для сравнения: у трека — title (так же, как матчится в блок-листе), иначе сама строка.
+function termText(item) {
+    const v = (item && typeof item === 'object') ? item.title : item;
+    return typeof v === 'string' ? v.trim().toLowerCase() : '';
+}
+
+async function loadWhitelist() {
+    const d = await chrome.storage.local.get(WL_KEYS);
+    const toTerms = items => (items || []).map(termText).filter(Boolean);
+    whitelistArtists = [...new Set(toTerms(d.whitelistedArtists))];
+    whitelist = [...new Set([...whitelistArtists, ...toTerms(d.whitelistedKeywords), ...toTerms(d.whitelistedTracks)])];
+    console.log(`[YTM Ward] Whitelist: ${whitelist.length} terms.`);
+}
+
+// Удаляет из указанных списков записи, чей текст совпадает с одним из texts (без учёта регистра).
+// Нужно, чтобы Blocklist и Whitelist не содержали одну и ту же запись одновременно.
+async function removeFromLists(keys, texts) {
+    const targets = new Set(texts.map(t => String(t || '').trim().toLowerCase()).filter(Boolean));
+    if (!targets.size) return 0;
+    const data = await chrome.storage.local.get(keys);
+    const update = {};
+    let removed = 0;
+    for (const key of keys) {
+        const items = data[key] || [];
+        const kept = items.filter(i => !targets.has(termText(i)));
+        if (kept.length !== items.length) {
+            update[key] = kept;
+            removed += items.length - kept.length;
+        }
+    }
+    if (removed) await chrome.storage.local.set(update);
+    return removed;
+}
+
+function isWhitelistedSong(song) {
+    if (!whitelist.length) return false;
+    return !!findWholeWordMatch((song.artist + " " + song.title).toLowerCase(), whitelist);
+}
+
+function isArtistTextWhitelisted(artistText) {
+    if (!whitelistArtists.length) return false;
+    return !!findWholeWordMatch(artistText.toLowerCase(), whitelistArtists);
+}
+
+// Клик по красному бейджу: добавляем в Whitelist найденных в AI-базе артистов
+// и убираем такие же записи из Blocklist.
+async function addAIArtistsToWhitelist(artistText) {
+    const lower = artistText.toLowerCase();
+    const names = [];
+    const seen = new Set();
+    aiArtistList.forEach(term => {
+        if (seen.has(term) || !matchesTerm(lower, term)) return;
+        seen.add(term);
+        names.push(aiArtistNames.get(term) || term);
+    });
+    if (!names.length) return;
+
+    const data = await chrome.storage.local.get(['whitelistedArtists']);
+    const list = data.whitelistedArtists || [];
+    const have = new Set(list.map(termText));
+    const toAdd = names.filter(n => !have.has(n.toLowerCase()));
+    if (toAdd.length) await chrome.storage.local.set({ whitelistedArtists: [...list, ...toAdd] });
+
+    await removeFromLists(BL_KEYS, names);
+    console.log(`[YTM Ward] ⚪ Whitelisted: ${names.join(', ')}`);
+}
+
+// Клик по белому бейджу в плеере: убираем из Whitelist все записи, из-за которых трек считается белым.
+async function removeSongFromWhitelist(song) {
+    const checkString = (song.artist + " " + song.title).toLowerCase();
+    const data = await chrome.storage.local.get(WL_KEYS);
+    const update = {};
+    WL_KEYS.forEach(key => {
+        const items = data[key] || [];
+        const kept = items.filter(i => {
+            const t = termText(i);
+            return !t || !matchesTerm(checkString, t);
+        });
+        if (kept.length !== items.length) update[key] = kept;
+    });
+    if (Object.keys(update).length) await chrome.storage.local.set(update);
+    console.log(`[YTM Ward] Removed from whitelist: "${song.artist} — ${song.title}"`);
+}
+
+// Клик по белому бейджу в строке списка: у строки известен только артист.
+async function removeArtistTextFromWhitelist(artistText) {
+    const lower = artistText.toLowerCase();
+    const data = await chrome.storage.local.get(['whitelistedArtists']);
+    const items = data.whitelistedArtists || [];
+    const kept = items.filter(i => {
+        const t = termText(i);
+        return !t || !matchesTerm(lower, t);
+    });
+    if (kept.length !== items.length) await chrome.storage.local.set({ whitelistedArtists: kept });
+}
+
+async function onPlayerBadgeClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const song = getSongInfo();
+    if (!song) return;
+    if (isWhitelistedSong(song)) await removeSongFromWhitelist(song);
+    else await addAIArtistsToWhitelist(song.artist);
+}
+
 async function refreshManualBlockList() {
     const localData = await chrome.storage.local.get(['blockedArtists', 'blockedKeywords', 'blockedTracks']);
     rebuildManualBlockList(localData.blockedArtists || [], localData.blockedKeywords || [], localData.blockedTracks || []);
@@ -117,6 +231,8 @@ async function updateBlockList() {
     }
 
     aiArtistList = remoteArtists.map(s => s.toLowerCase());
+    aiArtistNames = new Map();
+    remoteArtists.forEach(name => { const k = name.toLowerCase(); if (!aiArtistNames.has(k)) aiArtistNames.set(k, name.trim()); });
 
     rebuildManualBlockList(localArtists, localKeywords, localTracks);
         
@@ -124,12 +240,14 @@ async function updateBlockList() {
     scheduleScan();
 }
 
+function matchesTerm(text, term) {
+    const safeTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`\\b${safeTerm}\\b`, 'i');
+    return regex.test(text);
+}
+
 function findWholeWordMatch(text, list) {
-    return list.find(term => {
-        const safeTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(`\\b${safeTerm}\\b`, 'i');
-        return regex.test(text);
-    });
+    return list.find(term => matchesTerm(text, term));
 }
 
 function skipTrack(expectedSong) {
@@ -220,26 +338,38 @@ function getSongInfo() {
     };
 }
 
-function makeBadgeElement(size /* 'normal' | 'small' */) {
-    const badge = document.createElement("span");
-    badge.textContent = "AI";
-    badge.title = "Найден в базе ZoundHub как вероятный AI-артист";
-    const isSmall = size === 'small';
+// Красный бейдж — AI-артист из базы; белый с тёмной обводкой — артист в Whitelist.
+// Размеры у обоих одинаковые (у красного обводка прозрачная), чтобы бейдж не «прыгал» при смене цвета.
+function applyBadgeLook(badge, whitelisted) {
+    const isSmall = badge.dataset.size === 'small';
+    badge.dataset.wl = whitelisted ? '1' : '0';
+    badge.title = whitelisted
+        ? "В Whitelist. Нажмите, чтобы убрать"
+        : "Найден в базе ZoundHub как вероятный AI-артист. Нажмите, чтобы добавить в Whitelist";
     badge.style.cssText = `
         display: inline-flex; align-items: center; justify-content: center;
         align-self: center; flex-shrink: 0;
         box-sizing: border-box; line-height: 1; white-space: nowrap; user-select: none;
-        background: #ff2d2d; color: #fff;
+        cursor: pointer;
+        background: ${whitelisted ? '#fff' : '#ff2d2d'}; color: ${whitelisted ? '#111' : '#fff'};
+        border: 1px solid ${whitelisted ? '#333' : 'transparent'};
         font-size: ${isSmall ? '9px' : '10px'}; font-weight: 800; letter-spacing: 0.5px;
         border-radius: ${isSmall ? '3px' : '4px'}; padding: 0 ${isSmall ? '5px' : '6px'};
         height: ${isSmall ? '14px' : '16px'};
         margin: 0 ${isSmall ? '6px' : '8px'} 0 0; vertical-align: middle;
         position: relative; top: -1px;
     `;
+}
+
+function makeBadgeElement(size /* 'normal' | 'small' */, whitelisted = false) {
+    const badge = document.createElement("span");
+    badge.textContent = "AI";
+    badge.dataset.size = size === 'small' ? 'small' : 'normal';
+    applyBadgeLook(badge, whitelisted);
     return badge;
 }
 
-function updateAIBadge(show) {
+function updateAIBadge(show, whitelisted = false) {
     const bylineEl = document.querySelector("ytmusic-player-bar .byline");
     if (!bylineEl) return;
 
@@ -247,9 +377,12 @@ function updateAIBadge(show) {
 
     if (show) {
         if (!badge) {
-            badge = makeBadgeElement('normal');
+            badge = makeBadgeElement('normal', whitelisted);
             badge.id = "ytm-ward-ai-badge";
+            badge.addEventListener("click", onPlayerBadgeClick);
             bylineEl.prepend(badge);
+        } else if (badge.dataset.wl !== (whitelisted ? '1' : '0')) {
+            applyBadgeLook(badge, whitelisted);
         }
     } else if (badge) {
         badge.remove();
@@ -305,11 +438,22 @@ function scanRowsForBadges() {
         }
 
         const shouldShow = isAI && aiActions.label;
+        const isWhite = isArtistTextWhitelisted(artistText);
         let badge = row.querySelector(".ytm-ward-row-ai-badge");
 
         if (shouldShow && !badge) {
-            badge = makeBadgeElement('small');
+            badge = makeBadgeElement('small', isWhite);
             badge.classList.add("ytm-ward-row-ai-badge");
+            // Клик по бейджу не должен запускать воспроизведение строки
+            ['dblclick', 'mousedown'].forEach(type => badge.addEventListener(type, e => e.stopPropagation()));
+            badge.addEventListener("click", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const text = row.dataset.ytmwardChecked;
+                if (!text) return;
+                if (badge.dataset.wl === '1') removeArtistTextFromWhitelist(text);
+                else addAIArtistsToWhitelist(text);
+            });
 
             const badgesContainer = getBadgesContainer(row);
             if (badgesContainer) {
@@ -319,6 +463,8 @@ function scanRowsForBadges() {
             }
         } else if (!shouldShow && badge) {
             badge.remove();
+        } else if (badge && badge.dataset.wl !== (isWhite ? '1' : '0')) {
+            applyBadgeLook(badge, isWhite);
         }
     });
 }
@@ -381,12 +527,13 @@ function scheduleBadgeUpdate() {
         const song = getSongInfo();
         if (!song) return;
         const aiMatch = !!findWholeWordMatch(song.artist.toLowerCase(), aiArtistList);
-        updateAIBadge(aiMatch && aiActions.label);
+        const whitelisted = isWhitelistedSong(song);
+        updateAIBadge(aiMatch && aiActions.label, whitelisted);
 
         // NEW: текущий трек пишем в storage — его читает вкладка Info в попапе
         // (popup.js не имеет доступа к DOM страницы, только к chrome.storage).
         chrome.storage.local.set({
-            nowPlaying: { artist: song.artist, title: song.title, aiMatch, isPaused: song.isPaused, updatedAt: Date.now() }
+            nowPlaying: { artist: song.artist, title: song.title, aiMatch, whitelisted, isPaused: song.isPaused, updatedAt: Date.now() }
         });
     }, BADGE_SETTLE_MS);
 }
@@ -443,6 +590,7 @@ function waitForTitleChange(prevTitle, timeoutMs) {
 // Скипнуло бы расширение этот трек само? (ручной бан, либо AI при включённых
 // Dislike AI and Skip / Skip AI). Если действия выключены — «назад» работает как обычно.
 function wouldAutoHandle(song) {
+    if (isWhitelistedSong(song)) return false; // Whitelist главнее любых блокировок
     const checkString = (song.artist + " " + song.title).toLowerCase();
     if (findWholeWordMatch(checkString, blockList)) return true;
     const aiMatch = findWholeWordMatch(song.artist.toLowerCase(), aiArtistList);
@@ -554,10 +702,14 @@ function processSettledSong(expectedTitle) {
     if (!song || song.title !== expectedTitle) return;
 
     const aiMatch = !!findWholeWordMatch(song.artist.toLowerCase(), aiArtistList);
-    updateAIBadge(aiMatch && aiActions.label);
+    const whitelisted = isWhitelistedSong(song);
+    updateAIBadge(aiMatch && aiActions.label, whitelisted);
 
     if (song.title === lastProcessedSong) return;
     lastProcessedSong = song.title;
+
+    // Whitelist главнее и ручного блок-листа, и AI-базы — никаких действий с таким треком
+    if (whitelisted) return;
 
     const checkString = (song.artist + " " + song.title).toLowerCase();
     const manualTerm = findWholeWordMatch(checkString, blockList);
@@ -728,6 +880,8 @@ async function addToBlockList(term, listName, songAtClick) {
         const update = {};
         update[targetList] = list;
         await chrome.storage.local.set(update);
+        // Бан и Whitelist взаимоисключающие: такая же запись в Whitelist убирается
+        await removeFromLists(WL_KEYS, [termText(term)]);
         await refreshManualBlockList(); 
         const currentSong = getSongInfo();
         if (songAtClick && currentSong && currentSong.title === songAtClick.title) {
@@ -739,7 +893,7 @@ async function addToBlockList(term, listName, songAtClick) {
 }
 
 async function init() {
-    await Promise.all([updateBlockList(), loadAIActions(), loadEngineEnabled()]);
+    await Promise.all([updateBlockList(), loadAIActions(), loadEngineEnabled(), loadWhitelist()]);
     const playerBar = await waitForElement("ytmusic-player-bar");
     injectButtons();
     checkAndSkip();
@@ -839,6 +993,21 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
             scheduleBadgeUpdate();
         });
         return;
+    }
+
+    // Whitelist изменили (из попапа или кликом по бейджу): перечитываем и пересчитываем текущий трек.
+    // Отложенное действие над треком отменяем — иначе трек, только что попавший в Whitelist, мог бы
+    // успеть получить дизлайк/скип.
+    if (changes.whitelistedArtists || changes.whitelistedKeywords || changes.whitelistedTracks) {
+        loadWhitelist().then(() => {
+            clearTimeout(pendingActionTimer);
+            document.querySelectorAll('[data-ytmward-checked]').forEach(el => { delete el.dataset.ytmwardChecked; delete el.dataset.ytmwardAi; });
+            lastProcessedSong = "";
+            settleTitle = null;
+            scheduleScan();
+            checkAndSkip();
+            scheduleBadgeUpdate();
+        });
     }
 
     // NEW: раньше сюда попадал ЛЮБОЙ другой ключ storage (включая новые

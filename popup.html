@@ -15,7 +15,19 @@
     .tab-btn:hover { background: #444; color: #fff; }
     .tab-btn.active { background: #ff4444; color: white; font-weight: bold; }
 
-    /* Blocklist sub-type radio group (Keywords / Songs / Artists) */
+    /* My List: переключатель Blocklist / Whitelist */
+    .mode-group { display: flex; gap: 3px; margin-bottom: 10px; padding: 3px; background: #2a2a2a; border-radius: 6px; }
+    .mode-btn { flex: 1; padding: 7px 0; background: transparent; border: none; color: #aaa; font-size: 12px; cursor: pointer; border-radius: 4px; transition: 0.2s; }
+    .mode-btn:hover { color: #fff; }
+    .mode-btn.active[data-mode="block"] { background: #ff4444; color: #fff; font-weight: bold; }
+    .mode-btn.active[data-mode="white"] { background: #fff; color: #111; font-weight: bold; }
+    /* В режиме Whitelist акценты белые (как белый AI-бейдж) */
+    body.mode-white .subtype-option.active { color: #fff; }
+    body.mode-white .subtype-option input[type="radio"] { accent-color: #fff; }
+    body.mode-white input[type="text"]:focus { border-color: #fff; }
+    body.mode-white button#add:hover { background: #fff; color: #111; }
+
+    /* My List sub-type radio group (Keywords / Songs / Artists) */
     .subtype-group { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
     .subtype-option { display: flex; align-items: center; justify-content: center; gap: 6px; flex: 1; padding: 6px 0; font-size: 12px; color: #aaa; cursor: pointer; transition: 0.2s; }
     .subtype-option:hover { color: #fff; }
@@ -162,7 +174,7 @@
 
   <div class="tabs">
     <button class="tab-btn active" data-tab="info">Info</button>
-    <button class="tab-btn" data-tab="blocklist">My Blocklist</button>
+    <button class="tab-btn" data-tab="mylist">My List</button>
     <button class="tab-btn" data-tab="ai">AI DB</button>
     <button class="tab-btn" data-tab="settings">Settings</button>
   </div>
@@ -193,6 +205,11 @@
         <span class="stat-value" id="stat-since">—</span>
       </div>
     </div>
+  </div>
+
+  <div class="mode-group" id="mode-group" style="display:none;">
+    <button class="mode-btn active" data-mode="block">Blocklist</button>
+    <button class="mode-btn" data-mode="white">Whitelist</button>
   </div>
 
   <div class="subtype-group" id="subtype-group" style="display:none;">
