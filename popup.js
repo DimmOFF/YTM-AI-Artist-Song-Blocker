@@ -228,14 +228,39 @@ async function getCachedVerdict(artist) {
     return entry;
 }
 
-async function saveCachedVerdict(artist, isAI, reason) {
+async function saveCachedVerdict(artist, isAI, reason, checkedAt = Date.now()) {
     const data = await chrome.storage.local.get(['aiVerdictCache', 'cacheSize']);
     const cache = data.aiVerdictCache || {};
     const maxSize = data.cacheSize || DEFAULT_CACHE_SIZE;
 
-    cache[artist.toLowerCase()] = { isAI, reason, checkedAt: Date.now() };
+    cache[artist.toLowerCase()] = { isAI, reason, checkedAt };
     await chrome.storage.local.set({ aiVerdictCache: cache });
     await trimVerdictCache(maxSize);
+}
+
+// --- ARTIST LINKS CACHE (MusicBrainz, 30 дней, независимо от вердикта) ---
+
+const LINKS_CACHE_LIMIT = 500;
+
+async function getCachedLinks(artist) {
+    const data = await chrome.storage.local.get(['artistLinksCache']);
+    const entry = (data.artistLinksCache || {})[artist.toLowerCase()];
+    if (!entry || Date.now() - entry.checkedAt > CACHE_MAX_AGE_MS) return null;
+    if (entry.v !== 2) return null; // запись до появления Wikidata — перезапрашиваем
+    return entry;
+}
+
+async function saveCachedLinks(artist, links, found) {
+    const data = await chrome.storage.local.get(['artistLinksCache']);
+    const cache = data.artistLinksCache || {};
+    cache[artist.toLowerCase()] = { links: links || {}, found: found !== false, v: 2, checkedAt: Date.now() };
+
+    const keys = Object.keys(cache);
+    if (keys.length > LINKS_CACHE_LIMIT) {
+        keys.sort((a, b) => cache[a].checkedAt - cache[b].checkedAt);
+        for (let i = 0; i < keys.length - LINKS_CACHE_LIMIT; i++) delete cache[keys[i]];
+    }
+    await chrome.storage.local.set({ artistLinksCache: cache });
 }
 
 // --- RENDERING ---
@@ -349,7 +374,9 @@ function banArtistFromInfo(artist, btn) {
     });
 }
 
-function renderInfoTab() {
+// forceRefresh = true — игнорируем кэш и заново спрашиваем Groq (кнопка Refresh / Retry);
+// новый ответ перезапишет запись в кэше вместе с новой меткой времени.
+function renderInfoTab(forceRefresh = false) {
     chrome.storage.local.get(['nowPlaying', 'stats', 'groqApiKey'], async (res) => {
         const now = res.nowPlaying;
         const isPlaying = !!(now && now.artist && now.title && !now.isPaused);
@@ -373,9 +400,9 @@ function renderInfoTab() {
 
         // Кэш — только по артисту (не по треку), на 30 дней. Если есть
         // свежая запись — сети вообще не касаемся.
-        const cached = await getCachedVerdict(requestedArtist);
+        const cached = forceRefresh ? null : await getCachedVerdict(requestedArtist);
         if (cached) {
-            renderVerdict(requestedArtist, cached.isAI, cached.reason, true);
+            renderVerdict(requestedArtist, requestedTitle, cached.isAI, cached.reason, true, cached.checkedAt, forceRefresh);
             return;
         }
 
@@ -400,8 +427,9 @@ function renderInfoTab() {
                     }
 
                     const { isAI, reason } = result.data;
-                    saveCachedVerdict(requestedArtist, isAI, reason); // не ждём — запись в фоне
-                    renderVerdict(requestedArtist, isAI, reason, false);
+                    const checkedAt = Date.now();
+                    saveCachedVerdict(requestedArtist, isAI, reason, checkedAt); // не ждём — запись в фоне
+                    renderVerdict(requestedArtist, requestedTitle, isAI, reason, false, checkedAt, forceRefresh);
                 });
             })
             .catch(e => {
@@ -410,20 +438,170 @@ function renderInfoTab() {
     });
 }
 
-function renderVerdict(artist, isAI, reason, fromCache) {
+function formatCheckedAt(ts) {
+    if (!ts) return 'unknown';
+    return new Date(ts).toLocaleString(undefined, {
+        day: '2-digit', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+    });
+}
+
+// Иконки соцсетей (простые inline-SVG, без внешних файлов).
+const SOCIAL_ICONS = {
+    website:    { title: 'Website',     svg: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>' },
+    instagram:  { title: 'Instagram',   svg: '<rect x="3.5" y="3.5" width="17" height="17" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17" cy="7" r="0.8" fill="currentColor"/>' },
+    youtube:    { title: 'YouTube',     svg: '<rect x="2.5" y="5.5" width="19" height="13" rx="4"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/>' },
+    spotify:    { title: 'Spotify',     svg: '<circle cx="12" cy="12" r="9"/><path d="M7 9.5c3.5-1 7-.7 10 1M7.5 12.5c3-.8 6-.5 8.5 1M8 15.3c2.5-.6 5-.4 7 .8"/>' },
+    twitter:    { title: 'X / Twitter', svg: '<path d="M5 4l14 16M19 4L5 20"/>' },
+    facebook:   { title: 'Facebook',    svg: '<circle cx="12" cy="12" r="9"/><path d="M13.5 20v-7h2.3l.4-2.7h-2.7V8.6c0-.8.3-1.3 1.4-1.3h1.4V5a14 14 0 0 0-2-.1c-2 0-3.4 1.2-3.4 3.4v2H9v2.7h2.3v7"/>' },
+    tiktok:     { title: 'TikTok',      svg: '<path d="M14 4v10.5a3.5 3.5 0 1 1-3.5-3.5M14 4c.3 2.3 1.9 3.8 4.5 4"/>' },
+    soundcloud: { title: 'SoundCloud',  svg: '<path d="M3 15v-3M6 16V10M9 16V8M12 16V7c3-1 6 .5 6.3 3.2C20.5 10 22 11.4 22 13.2c0 1.6-1.3 2.8-3 2.8H12"/>' },
+    bandcamp:   { title: 'Bandcamp',    svg: '<path d="M3 17.5L8.5 6.5H21L15.5 17.5z"/>' }
+};
+
+// Платформы, для которых при отсутствии проверенной ссылки показываем
+// иконку-поиск (ведёт на страницу результатов, а не на «угаданный» профиль).
+const SEARCH_FALLBACKS = {
+    instagram: (q) => 'https://www.google.com/search?q=' + encodeURIComponent(q + ' instagram'),
+    youtube:   (q) => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q),
+    spotify:   (q) => 'https://open.spotify.com/search/' + encodeURIComponent(q),
+    tiktok:    (q) => 'https://www.google.com/search?q=' + encodeURIComponent(q + ' tiktok'),
+    twitter:   (q) => 'https://www.google.com/search?q=' + encodeURIComponent(q + ' twitter x'),
+    facebook:  (q) => 'https://www.google.com/search?q=' + encodeURIComponent(q + ' facebook')
+};
+
+// Фирменные цвета — для запасной (inline-SVG) иконки, если favicon не загрузился.
+const SOCIAL_COLORS = {
+    website: '#4caf50', instagram: '#e4405f', youtube: '#ff0000', spotify: '#1db954',
+    twitter: '#ffffff', facebook: '#1877f2', tiktok: '#25f4ee', soundcloud: '#ff5500', bandcamp: '#629aa9'
+};
+
+function svgIconHtml(meta, color) {
+    return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="${color || 'currentColor'}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${meta.svg}</svg>`;
+}
+
+// Проверенная ссылка → цветной favicon сайта (через сервис favicon Google;
+// наружу уходит только домен, не весь URL). Если картинка не загрузилась
+// (нет сети / блокировка) — подменяем цветной inline-SVG.
+// Ссылка-поиск → серая пунктирная иконка без favicon.
+function makeSocialAnchor(key, meta, href, isSearch) {
+    const a = document.createElement('a');
+    a.className = 'groq-social-link' + (isSearch ? ' search' : '');
+    a.href = href;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.title = isSearch ? `Search: ${meta.title}` : href; // при наведении — полная ссылка
+
+    if (isSearch) {
+        a.innerHTML = svgIconHtml(meta);
+        return a;
+    }
+
+    let host = '';
+    try { host = new URL(href).hostname; } catch (e) { /* оставим SVG */ }
+
+    const colorSvg = () => { a.innerHTML = svgIconHtml(meta, SOCIAL_COLORS[key]); };
+
+    if (!host) { colorSvg(); return a; }
+
+    const img = document.createElement('img');
+    img.width = 16;
+    img.height = 16;
+    img.alt = meta.title;
+    img.src = 'https://www.google.com/s2/favicons?sz=64&domain=' + encodeURIComponent(host);
+    img.addEventListener('error', colorSvg, { once: true });
+    a.appendChild(img);
+    return a;
+}
+
+// verified — ссылки из MusicBrainz (сплошные иконки); для платформ без
+// такой ссылки добавляем пунктирные иконки-поиск.
+function buildSocialLinks(artist, verified) {
+    const row = document.createElement('div');
+    row.className = 'groq-social-row';
+    verified = verified || {};
+
+    for (const [key, meta] of Object.entries(SOCIAL_ICONS)) {
+        const href = verified[key];
+        if (typeof href === 'string' && /^https:\/\//i.test(href)) {
+            row.appendChild(makeSocialAnchor(key, meta, href, false));
+        }
+    }
+    for (const [key, makeUrl] of Object.entries(SEARCH_FALLBACKS)) {
+        if (!verified[key]) row.appendChild(makeSocialAnchor(key, SOCIAL_ICONS[key], makeUrl(artist), true));
+    }
+    return row;
+}
+
+let socialRequestId = 0;
+
+async function loadSocialLinks(artist, title, force) {
+    const myId = ++socialRequestId;
+    const stillRelevant = () => myId === socialRequestId && groqBox.querySelector('.groq-meta-row');
+
+    // note — короткая подпись под иконками: чем закончился поиск ссылок.
+    const attach = (links, note) => {
+        if (!stillRelevant()) return;
+        groqBox.querySelectorAll('.groq-social-row, .groq-social-note').forEach(el => el.remove());
+        groqBox.appendChild(buildSocialLinks(artist, links));
+        if (note) {
+            const n = document.createElement('div');
+            n.className = 'groq-social-note';
+            n.textContent = note;
+            groqBox.appendChild(n);
+        }
+    };
+
+    const describe = (links, found) => {
+        const count = Object.keys(links || {}).length;
+        if (count) return '';
+        return found ? 'MusicBrainz/Wikidata: artist found, but no social links on file' : 'MusicBrainz: artist not found';
+    };
+
+    const cached = force ? null : await getCachedLinks(artist);
+    if (cached) { attach(cached.links, describe(cached.links, cached.found)); return; }
+
+    chrome.runtime.sendMessage({ type: 'FETCH_ARTIST_LINKS', artist, title })
+        .then(result => {
+            if (!result || !result.ok) {
+                // сбой сети/сервиса — не кэшируем, чтобы повторить при следующем открытии
+                attach({}, 'Links lookup failed: ' + ((result && result.error) || 'no response'));
+                return;
+            }
+            saveCachedLinks(artist, result.data.links, result.data.found);
+            attach(result.data.links, describe(result.data.links, result.data.found));
+        })
+        .catch(e => attach({}, 'Links lookup failed: ' + (e && e.message ? e.message : e)));
+}
+
+function renderVerdict(artist, title, isAI, reason, fromCache, checkedAt, forceLinks) {
+    // isAI: true → LIKELY AI, false → LIKELY HUMAN, null → UNKNOWN
+    let badgeClass = 'unknown';
+    let badgeText = 'UNKNOWN';
+    if (isAI === true) { badgeClass = 'is-ai'; badgeText = 'LIKELY AI'; }
+    else if (isAI === false) { badgeClass = 'not-ai'; badgeText = 'LIKELY HUMAN'; }
+
     groqBox.innerHTML = `
-        <span class="groq-verdict-badge ${isAI ? 'is-ai' : 'not-ai'}">${isAI ? 'LIKELY AI' : 'LIKELY HUMAN'}</span>
-        ${fromCache ? '<span style="font-size:10px; color:#666; margin-left:6px;">(cached)</span>' : ''}
+        <div class="groq-meta-row">
+            <span class="groq-verdict-badge ${badgeClass}">${badgeText}</span>
+            ${fromCache ? '<span class="groq-cached-label">(cached)</span>' : ''}
+            <button class="groq-refresh-btn" title="Ask Groq again and replace the cached answer">↻ Refresh</button>
+        </div>
+        <div class="groq-timestamp">Checked: ${escapeHtml(formatCheckedAt(checkedAt))}</div>
         <div>${escapeHtml(reason || 'No details provided.')}</div>
     `;
 
-    if (isAI) {
+    groqBox.querySelector('.groq-refresh-btn').onclick = () => renderInfoTab(true);
+
+    if (isAI === true) {
         const banBtn = document.createElement('button');
         banBtn.className = 'groq-ban-btn';
         banBtn.textContent = '🚫 Ban Artist';
         banBtn.onclick = () => banArtistFromInfo(artist, banBtn);
         groqBox.appendChild(banBtn);
     }
+
+    loadSocialLinks(artist, title, forceLinks); // иконки подгружаются отдельно и не задерживают вердикт
 }
 
 // Короткое человекочитаемое сообщение + кнопка Retry. background.js уже
@@ -438,7 +616,7 @@ function renderGroqError(message) {
     retryBtn.className = 'groq-ban-btn';
     retryBtn.style.background = '#444';
     retryBtn.textContent = '↻ Retry';
-    retryBtn.onclick = () => renderInfoTab();
+    retryBtn.onclick = () => renderInfoTab(true);
     groqBox.appendChild(retryBtn);
 }
 
