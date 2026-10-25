@@ -236,6 +236,18 @@ function closeWhitelistMenu() {
     if (menu) menu.remove();
     document.removeEventListener("mousedown", onWhitelistMenuOutside, true);
     document.removeEventListener("keydown", onWhitelistMenuKey, true);
+    document.removeEventListener("scroll", onWhitelistMenuScroll, true);
+    document.removeEventListener("wheel", onWhitelistMenuScroll, true);
+    window.removeEventListener("resize", closeWhitelistMenu);
+}
+
+// Меню позиционируется один раз (position: fixed), поэтому при прокрутке оно «отрывалось»
+// бы от бейджа. Закрываем его при любой прокрутке страницы, колеса мыши или смене размера окна.
+// Скролл в YTM идёт во внутренних контейнерах, поэтому слушаем в capture-фазе на document.
+function onWhitelistMenuScroll(e) {
+    const menu = document.getElementById("ytm-ward-wl-menu");
+    if (menu && e.target instanceof Node && menu.contains(e.target)) return;
+    closeWhitelistMenu();
 }
 
 function onWhitelistMenuOutside(e) {
@@ -306,6 +318,9 @@ function showWhitelistMenu(anchor, options, title = "Add to whitelist") {
 
     document.addEventListener("mousedown", onWhitelistMenuOutside, true);
     document.addEventListener("keydown", onWhitelistMenuKey, true);
+    document.addEventListener("scroll", onWhitelistMenuScroll, true);
+    document.addEventListener("wheel", onWhitelistMenuScroll, { capture: true, passive: true });
+    window.addEventListener("resize", closeWhitelistMenu);
 }
 
 // Меню «Remove from whitelist»: показываем только те варианты, по которым запись реально есть.
