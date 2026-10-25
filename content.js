@@ -12,6 +12,8 @@ let aiArtistNames = new Map();
 // (по ним судим о строках в списках, где нам известен лишь артист).
 let whitelist = [];
 let whitelistArtists = [];
+let whitelistKeywords = [];
+let whitelistTracks = new Set(); // названия треков (lower-case) — сравниваются точно, а не «по слову»
 const WL_KEYS = ['whitelistedArtists', 'whitelistedKeywords', 'whitelistedTracks'];
 const BL_KEYS = ['blockedArtists', 'blockedKeywords', 'blockedTracks'];
 let lastProcessedSong = ""; 
@@ -98,8 +100,10 @@ async function loadWhitelist() {
     const d = await chrome.storage.local.get(WL_KEYS);
     const toTerms = items => (items || []).map(termText).filter(Boolean);
     whitelistArtists = [...new Set(toTerms(d.whitelistedArtists))];
-    whitelist = [...new Set([...whitelistArtists, ...toTerms(d.whitelistedKeywords), ...toTerms(d.whitelistedTracks)])];
-    console.log(`[YTM Ward] Whitelist: ${whitelist.length} terms.`);
+    whitelist = [...new Set([...whitelistArtists, ...toTerms(d.whitelistedKeywords)])];
+    whitelistKeywords = [...new Set(toTerms(d.whitelistedKeywords))];
+    whitelistTracks = new Set(toTerms(d.whitelistedTracks));
+    console.log(`[YTM Ward] Whitelist: ${whitelist.length} terms, ${whitelistTracks.size} tracks.`);
 }
 
 // Удаляет из указанных списков записи, чей текст совпадает с одним из texts (без учёта регистра).
@@ -123,6 +127,7 @@ async function removeFromLists(keys, texts) {
 }
 
 function isWhitelistedSong(song) {
+    if (whitelistTracks.has(String(song.title || '').trim().toLowerCase())) return true;
     if (!whitelist.length) return false;
     return !!findWholeWordMatch((song.artist + " " + song.title).toLowerCase(), whitelist);
 }
@@ -134,7 +139,8 @@ function isArtistTextWhitelisted(artistText) {
 
 // Клик по красному бейджу: добавляем в Whitelist найденных в AI-базе артистов
 // и убираем такие же записи из Blocklist.
-async function addAIArtistsToWhitelist(artistText) {
+// Имена AI-артистов из базы, найденные в строке артиста (в оригинальном регистре).
+function getAIMatchNames(artistText) {
     const lower = artistText.toLowerCase();
     const names = [];
     const seen = new Set();
@@ -143,6 +149,11 @@ async function addAIArtistsToWhitelist(artistText) {
         seen.add(term);
         names.push(aiArtistNames.get(term) || term);
     });
+    return names;
+}
+
+async function addAIArtistsToWhitelist(artistText) {
+    const names = getAIMatchNames(artistText);
     if (!names.length) return;
 
     const data = await chrome.storage.local.get(['whitelistedArtists']);
@@ -156,15 +167,26 @@ async function addAIArtistsToWhitelist(artistText) {
 }
 
 // Клик по белому бейджу в плеере: убираем из Whitelist все записи, из-за которых трек считается белым.
-async function removeSongFromWhitelist(song) {
+function wlKeysForScope(scope) {
+    if (scope === 'artist') return ['whitelistedArtists'];
+    if (scope === 'song') return ['whitelistedTracks'];
+    if (scope === 'keyword') return ['whitelistedKeywords'];
+    if (scope === 'both') return ['whitelistedArtists', 'whitelistedTracks'];
+    return WL_KEYS;
+}
+
+async function removeSongFromWhitelist(song, scope = 'all') {
     const checkString = (song.artist + " " + song.title).toLowerCase();
-    const data = await chrome.storage.local.get(WL_KEYS);
+    const titleLower = String(song.title || '').trim().toLowerCase();
+    const keys = wlKeysForScope(scope);
+    const data = await chrome.storage.local.get(keys);
     const update = {};
-    WL_KEYS.forEach(key => {
+    keys.forEach(key => {
         const items = data[key] || [];
         const kept = items.filter(i => {
             const t = termText(i);
-            return !t || !matchesTerm(checkString, t);
+            if (!t) return true;
+            return key === 'whitelistedTracks' ? t !== titleLower : !matchesTerm(checkString, t);
         });
         if (kept.length !== items.length) update[key] = kept;
     });
@@ -172,16 +194,130 @@ async function removeSongFromWhitelist(song) {
     console.log(`[YTM Ward] Removed from whitelist: "${song.artist} — ${song.title}"`);
 }
 
-// Клик по белому бейджу в строке списка: у строки известен только артист.
-async function removeArtistTextFromWhitelist(artistText) {
+// Клик по белому бейджу в строке списка: убираем артиста (по тексту строки) и трек (по названию).
+async function removeRowFromWhitelist(artistText, title, scope = 'both') {
     const lower = artistText.toLowerCase();
-    const data = await chrome.storage.local.get(['whitelistedArtists']);
-    const items = data.whitelistedArtists || [];
-    const kept = items.filter(i => {
-        const t = termText(i);
-        return !t || !matchesTerm(lower, t);
+    const titleLower = String(title || '').trim().toLowerCase();
+    const keys = wlKeysForScope(scope);
+    const data = await chrome.storage.local.get(['whitelistedArtists', 'whitelistedTracks']);
+    const update = {};
+
+    if (keys.includes('whitelistedArtists')) {
+        const artists = data.whitelistedArtists || [];
+        const keptArtists = artists.filter(i => { const t = termText(i); return !t || !matchesTerm(lower, t); });
+        if (keptArtists.length !== artists.length) update.whitelistedArtists = keptArtists;
+    }
+
+    if (keys.includes('whitelistedTracks') && titleLower) {
+        const tracks = data.whitelistedTracks || [];
+        const keptTracks = tracks.filter(i => termText(i) !== titleLower);
+        if (keptTracks.length !== tracks.length) update.whitelistedTracks = keptTracks;
+    }
+
+    if (Object.keys(update).length) await chrome.storage.local.set(update);
+}
+
+// Добавление в Whitelist конкретного трека (по названию). Из Blocklist убирается такой же трек.
+async function addTrackToWhitelist(title, artist) {
+    const clean = String(title || '').trim();
+    if (!clean) return;
+    const data = await chrome.storage.local.get(['whitelistedTracks']);
+    const list = data.whitelistedTracks || [];
+    if (!list.some(i => termText(i) === clean.toLowerCase())) {
+        await chrome.storage.local.set({ whitelistedTracks: [...list, { title: clean, artist: artist || '' }] });
+    }
+    await removeFromLists(['blockedTracks'], [clean]);
+    console.log(`[YTM Ward] ⚪ Whitelisted track: "${clean}"`);
+}
+
+// ----- Меню выбора: в Whitelist по исполнителю или по треку -----
+function closeWhitelistMenu() {
+    const menu = document.getElementById("ytm-ward-wl-menu");
+    if (menu) menu.remove();
+    document.removeEventListener("mousedown", onWhitelistMenuOutside, true);
+    document.removeEventListener("keydown", onWhitelistMenuKey, true);
+}
+
+function onWhitelistMenuOutside(e) {
+    const menu = document.getElementById("ytm-ward-wl-menu");
+    if (menu && !menu.contains(e.target) && !(menu._anchor && menu._anchor.contains(e.target))) closeWhitelistMenu();
+}
+
+function onWhitelistMenuKey(e) {
+    if (e.key === "Escape") closeWhitelistMenu();
+}
+
+// options: [{ kind, value, action }] — kind это подпись («Artist» / «Song»), value — что будет добавлено.
+function showWhitelistMenu(anchor, options, title = "Add to whitelist") {
+    const existing = document.getElementById("ytm-ward-wl-menu");
+    if (existing) {
+        const sameAnchor = existing._anchor === anchor;
+        closeWhitelistMenu();
+        if (sameAnchor) return; // повторный клик по бейджу закрывает меню
+    }
+
+    const menu = document.createElement("div");
+    menu._anchor = anchor;
+    menu.id = "ytm-ward-wl-menu";
+    menu.style.cssText = `
+        position: fixed; z-index: 2147483647; box-sizing: border-box;
+        min-width: 130px; padding: 4px; border-radius: 8px;
+        background: #212121; color: #fff; border: 1px solid #444;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+        font-family: "Roboto", "YouTube Sans", Arial, sans-serif; font-size: 12px;
+    `;
+    ['mousedown', 'click', 'dblclick'].forEach(type => menu.addEventListener(type, e => e.stopPropagation()));
+
+    const head = document.createElement("div");
+    head.textContent = title;
+    head.style.cssText = "padding: 4px 8px 6px; color: #aaa; font-size: 11px; white-space: nowrap; user-select: none;";
+    menu.appendChild(head);
+
+    options.forEach(opt => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.style.cssText = `
+            display: block; width: 100%; text-align: left; padding: 7px 8px; margin: 0;
+            background: transparent; border: none; border-radius: 4px; color: #fff; cursor: pointer;
+            font: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        `;
+        btn.textContent = opt.kind;
+        btn.title = opt.value; // что именно будет добавлено — во всплывающей подсказке
+        btn.addEventListener("mouseenter", () => { btn.style.background = "#333"; });
+        btn.addEventListener("mouseleave", () => { btn.style.background = "transparent"; });
+        btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            closeWhitelistMenu();
+            opt.action();
+        });
+        menu.appendChild(btn);
     });
-    if (kept.length !== items.length) await chrome.storage.local.set({ whitelistedArtists: kept });
+
+    document.body.appendChild(menu);
+
+    // Позиция: под бейджем, а если не помещается (плеер внизу экрана) — над ним
+    const r = anchor.getBoundingClientRect();
+    const mh = menu.offsetHeight;
+    const top = (r.bottom + 6 + mh > window.innerHeight) ? Math.max(4, r.top - mh - 6) : r.bottom + 6;
+    const left = Math.min(Math.max(4, r.left), window.innerWidth - menu.offsetWidth - 4);
+    menu.style.top = top + "px";
+    menu.style.left = left + "px";
+
+    document.addEventListener("mousedown", onWhitelistMenuOutside, true);
+    document.addEventListener("keydown", onWhitelistMenuKey, true);
+}
+
+// Меню «Remove from whitelist»: показываем только те варианты, по которым запись реально есть.
+// hits: { artist, song, keyword } — что именно сейчас делает трек «белым».
+function showRemoveMenu(anchor, hits, values, doRemove) {
+    const options = [];
+    if (hits.artist) options.push({ kind: "Artist", value: values.artist, action: () => doRemove('artist') });
+    if (hits.song) options.push({ kind: "Song", value: values.song, action: () => doRemove('song') });
+    if (hits.artist && hits.song) options.push({ kind: "Both", value: values.artist + " — " + values.song, action: () => doRemove('both') });
+    if (hits.keyword) options.push({ kind: "Keyword", value: values.artist + " — " + values.song, action: () => doRemove('keyword') });
+    if (!options.length) return;
+    showWhitelistMenu(anchor, options, "Remove from whitelist");
 }
 
 async function onPlayerBadgeClick(e) {
@@ -189,8 +325,28 @@ async function onPlayerBadgeClick(e) {
     e.stopPropagation();
     const song = getSongInfo();
     if (!song) return;
-    if (isWhitelistedSong(song)) await removeSongFromWhitelist(song);
-    else await addAIArtistsToWhitelist(song.artist);
+    if (isWhitelistedSong(song)) {
+        const checkString = (song.artist + " " + song.title).toLowerCase();
+        const hits = {
+            artist: whitelistArtists.some(t => matchesTerm(checkString, t)),
+            song: whitelistTracks.has(song.title.trim().toLowerCase()),
+            keyword: whitelistKeywords.some(t => matchesTerm(checkString, t))
+        };
+        showRemoveMenu(e.currentTarget, hits, { artist: song.artist, song: song.title }, scope => removeSongFromWhitelist(song, scope));
+        return;
+    }
+    const artistLabel = getAIMatchNames(song.artist).join(", ") || song.artist;
+    showWhitelistMenu(e.currentTarget, [
+        { kind: "Artist", value: artistLabel, action: () => addAIArtistsToWhitelist(song.artist) },
+        { kind: "Song", value: song.title, action: () => addTrackToWhitelist(song.title, song.artist) }
+    ]);
+}
+
+// Название трека в строке списка/очереди (у карточек альбомов/исполнителей трека нет — вернёт '').
+function getRowTitle(row) {
+    if (row.tagName.toLowerCase() === "ytmusic-two-row-item-renderer") return "";
+    const el = row.querySelector("yt-formatted-string.title") || row.querySelector(".song-title") || row.querySelector(".title");
+    return el ? el.textContent.trim() : "";
 }
 
 async function refreshManualBlockList() {
@@ -240,9 +396,11 @@ async function updateBlockList() {
     scheduleScan();
 }
 
+// «Целое слово» с поддержкой Unicode: \b в JS видит только ASCII, поэтому кириллица
+// и названия со скобками/знаками по краям (напр. "Song (feat. X)") никогда не совпадали.
 function matchesTerm(text, term) {
     const safeTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`\\b${safeTerm}\\b`, 'i');
+    const regex = new RegExp(`(?<![\\p{L}\\p{N}_])${safeTerm}(?![\\p{L}\\p{N}_])`, 'iu');
     return regex.test(text);
 }
 
@@ -344,8 +502,8 @@ function applyBadgeLook(badge, whitelisted) {
     const isSmall = badge.dataset.size === 'small';
     badge.dataset.wl = whitelisted ? '1' : '0';
     badge.title = whitelisted
-        ? "В Whitelist. Нажмите, чтобы убрать"
-        : "Найден в базе ZoundHub как вероятный AI-артист. Нажмите, чтобы добавить в Whitelist";
+        ? "In whitelist. Click to remove"
+        : "Likely AI artist (ZoundHub). Click to add to whitelist";
     badge.style.cssText = `
         display: inline-flex; align-items: center; justify-content: center;
         align-self: center; flex-shrink: 0;
@@ -438,7 +596,8 @@ function scanRowsForBadges() {
         }
 
         const shouldShow = isAI && aiActions.label;
-        const isWhite = isArtistTextWhitelisted(artistText);
+        const rowTitle = getRowTitle(row);
+        const isWhite = isArtistTextWhitelisted(artistText) || (!!rowTitle && whitelistTracks.has(rowTitle.toLowerCase()));
         let badge = row.querySelector(".ytm-ward-row-ai-badge");
 
         if (shouldShow && !badge) {
@@ -451,8 +610,20 @@ function scanRowsForBadges() {
                 e.stopPropagation();
                 const text = row.dataset.ytmwardChecked;
                 if (!text) return;
-                if (badge.dataset.wl === '1') removeArtistTextFromWhitelist(text);
-                else addAIArtistsToWhitelist(text);
+                const title = getRowTitle(row);
+                if (badge.dataset.wl === '1') {
+                    const hits = {
+                        artist: isArtistTextWhitelisted(text),
+                        song: !!title && whitelistTracks.has(title.toLowerCase())
+                    };
+                    showRemoveMenu(badge, hits, { artist: text, song: title }, scope => removeRowFromWhitelist(text, title, scope));
+                    return;
+                }
+                if (!title) { addAIArtistsToWhitelist(text); return; } // трека нет (альбом/исполнитель) — только по исполнителю
+                showWhitelistMenu(badge, [
+                    { kind: "Artist", value: getAIMatchNames(text).join(", ") || text, action: () => addAIArtistsToWhitelist(text) },
+                    { kind: "Song", value: title, action: () => addTrackToWhitelist(title, text) }
+                ]);
             });
 
             const badgesContainer = getBadgesContainer(row);
@@ -970,6 +1141,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         if (!engineEnabled) {
             clearTimeout(pendingActionTimer);
             clearAllBadges();
+            closeWhitelistMenu();
             removeInjectedButtons();
         } else {
             lastProcessedSong = ""; // пересчитать текущий трек с нуля после включения
