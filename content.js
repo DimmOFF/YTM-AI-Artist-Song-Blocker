@@ -86,13 +86,16 @@ async function refreshManualBlockList() {
 }
 
 async function updateBlockList() {
-    const localData = await chrome.storage.local.get(['blockedArtists', 'blockedKeywords', 'blockedTracks']);
+    const localData = await chrome.storage.local.get(['blockedArtists', 'blockedKeywords', 'blockedTracks', 'sourceEnabled']);
     const localArtists = localData.blockedArtists || [];
     const localKeywords = localData.blockedKeywords || []; 
     const localTracks = localData.blockedTracks || []; 
+    // Источник ZoundHub можно выключить на вкладке AI DB (по умолчанию включён)
+    const zoundhubEnabled = !(localData.sourceEnabled && localData.sourceEnabled.zoundhub === false);
     
     let remoteArtists = [];
     try {
+        if (!zoundhubEnabled) throw new Error('source disabled');
         const result = await chrome.runtime.sendMessage({ type: 'FETCH_AI_ARTISTS' });
         if (result && result.ok) {
             const data = result.data;
@@ -845,5 +848,21 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     // на каждый трек. Реагируем только на реальные изменения блок-листов.
     if (changes.blockedArtists || changes.blockedKeywords || changes.blockedTracks) {
         updateBlockList();
+    }
+
+    // Источник ZoundHub включили/выключили на вкладке AI DB: пересобираем
+    // список и сбрасываем кэш «уже проверено» у строк и текущего трека.
+    const prevZ = !(changes.sourceEnabled && changes.sourceEnabled.oldValue && changes.sourceEnabled.oldValue.zoundhub === false);
+    const nextZ = !(changes.sourceEnabled && changes.sourceEnabled.newValue && changes.sourceEnabled.newValue.zoundhub === false);
+    if (changes.sourceEnabled && prevZ !== nextZ) {
+        updateBlockList().then(() => {
+            document.querySelectorAll('[data-ytmward-checked]').forEach(el => { delete el.dataset.ytmwardChecked; delete el.dataset.ytmwardAi; });
+            clearAllBadges();
+            lastProcessedSong = "";
+            settleTitle = null;
+            scheduleScan();
+            checkAndSkip();
+            scheduleBadgeUpdate();
+        });
     }
 });

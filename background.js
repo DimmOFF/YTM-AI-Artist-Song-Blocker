@@ -373,6 +373,8 @@ Rules for JSON fields:
 
     const rawText = data?.choices?.[0]?.message?.content || '';
     const cleaned = rawText.replace(/```json|```/g, '').trim();
+    // Отладка: DevTools → chrome://extensions → «service worker» → Console
+    console.log('[YTM Ward] Groq raw answer for', artist, '-', title, ':', cleaned);
 
     let parsed;
     try {
@@ -390,9 +392,45 @@ Rules for JSON fields:
     };
 }
 
+// --- SoundProof (источник: голоса сообщества) ---
+// Только чтение: get_artist_status возвращает число голосов «AI» и «Human»
+// по исполнителю и флаг verified. Голосование из этого расширения не
+// выполняется. Ключ — публичный (publishable) ключ клиента SoundProof;
+// данные принадлежат сервису SoundProof.
+const SOUNDPROOF_URL = 'https://solsneywdlhvwbtghopw.supabase.co/rest/v1/rpc/get_artist_status';
+const SOUNDPROOF_KEY = 'sb_publishable_dlFufI-1QXA4VJdGoMWxMw_ouWHyl3k';
+const SOUNDPROOF_PLATFORM = 'music'; // так SoundProof называет YouTube Music
+
+async function fetchSoundproofStatus(artist) {
+    const response = await fetch(SOUNDPROOF_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SOUNDPROOF_KEY },
+        body: JSON.stringify({ target_id: String(artist).toLowerCase().trim(), platform_input: SOUNDPROOF_PLATFORM })
+    });
+    if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        console.warn('[YTM Ward] SoundProof HTTP', response.status, body.slice(0, 200));
+        throw new Error(`SoundProof HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    const row = Array.isArray(data) ? (data[0] || {}) : (data || {});
+    return {
+        human: Number(row.out_human) || 0,
+        ai: Number(row.out_ai) || 0,
+        verified: row.out_verified === true
+    };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message && message.type === 'FETCH_AI_ARTISTS') {
         fetchArtists()
+            .then(data => sendResponse({ ok: true, data }))
+            .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
+        return true;
+    }
+
+    if (message && message.type === 'FETCH_SOUNDPROOF') {
+        fetchSoundproofStatus(message.artist)
             .then(data => sendResponse({ ok: true, data }))
             .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
         return true;

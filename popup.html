@@ -94,6 +94,40 @@
     .groq-social-link { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: #333; color: #ccc; text-decoration: none; }
     .groq-social-link:hover { background: #444; color: #fff; }
     .groq-social-link img { width: 16px; height: 16px; border-radius: 3px; display: block; }
+    /* Source pills / colors (отличают источник информации) */
+    .src-zoundhub  { --src: #4da3ff; }
+    .src-soundproof { --src: #b072ff; }
+    .src-groq      { --src: #ffa726; }
+    .src-pill { display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; color: #111; background: var(--src); flex-shrink: 0; }
+
+    /* AI DB: карточки источников */
+    #sources-panel { display: none; flex-direction: column; gap: 8px; }
+    .source-card { display: flex; align-items: center; gap: 10px; background: #222; border: 1px solid #333; border-left: 4px solid var(--src); border-radius: 6px; padding: 10px; transition: opacity 0.2s; }
+    .source-card.disabled { opacity: 0.55; }
+    .source-card input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--src); cursor: pointer; flex-shrink: 0; margin: 0; }
+    .source-main { flex: 1; min-width: 0; }
+    .source-name { font-size: 12px; font-weight: bold; color: #eee; margin-top: 4px; }
+    .source-desc { font-size: 10px; color: #888; margin-top: 2px; line-height: 1.4; }
+    .source-stat { font-size: 11px; color: #aaa; margin-top: 6px; }
+    .source-stat b { color: #fff; }
+    .source-stat.error { color: #ff4444; }
+    .source-ttl-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 10px; color: #888; }
+    .source-ttl-row select { background: #2a2a2a; border: 1px solid #444; color: #fff; border-radius: 4px; padding: 3px 6px; font-size: 11px; outline: none; cursor: pointer; }
+    .source-ttl-row select:focus { border-color: var(--src); }
+    .source-reload { flex: 0 0 auto; width: 28px; height: 28px; border: none; border-radius: 4px; background: #333; color: #ccc; cursor: pointer; font-size: 14px; }
+    .source-reload:hover { background: #444; color: #fff; }
+
+    /* Info: карточка SoundProof */
+    .soundproof-box { border-left: 4px solid var(--src); }
+    .groq-verdict-badge.lean-ai { background: #e08a1e; color: #fff; }
+    .groq-verdict-badge.lean-human { background: #6aa84f; color: #fff; }
+    .sp-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #333; margin: 6px 0; }
+    .sp-bar .h { background: #4caf50; }
+    .sp-bar .a { background: #ff4d4d; }
+    .sp-line { display: flex; justify-content: space-between; font-size: 11px; color: #aaa; }
+    .sp-line b { color: #fff; }
+    .sp-verified { color: #4caf50; font-size: 10px; margin-top: 4px; }
+
     .groq-social-note { font-size: 10px; color: #666; margin-top: 6px; }
     .groq-social-link.search { background: transparent; border: 1px dashed #555; color: #888; box-sizing: border-box; }
     .groq-social-link.search:hover { border-color: #888; color: #ddd; }
@@ -143,6 +177,8 @@
       <div class="hint">Open YouTube Music to check the current artist.</div>
     </div>
 
+    <div class="groq-box soundproof-box src-soundproof" id="soundproof-box" style="display:none;"></div>
+
     <div class="stats-box">
       <div class="stat-row">
         <span class="stat-label">Blocked today</span>
@@ -181,6 +217,8 @@
 
   <ul id="list" style="display:none;"></ul>
 
+  <div id="sources-panel"></div>
+
   <div id="settings-panel" style="display:none;">
     <div class="settings-hint">On AI artist detection, apply:</div>
 
@@ -218,7 +256,6 @@
   </div>
 
   <div class="actions" id="actions-row" style="display:none;">
-    <button class="action-btn" id="btn-refresh">↻ Reload DB</button>
     <button class="action-btn" id="btn-export">⬇ Export JSON</button>
     <button class="action-btn" id="btn-import">⬆ Import JSON</button>
     <input type="file" id="file-input" accept=".json" style="display: none;">

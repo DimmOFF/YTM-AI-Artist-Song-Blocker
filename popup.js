@@ -13,7 +13,8 @@ const input = document.getElementById('input');
 const addBtn = document.getElementById('add');
 const inputArea = document.getElementById('input-area');
 const statusLabel = document.getElementById('status');
-const btnRefresh = document.getElementById('btn-refresh');
+const sourcesPanel = document.getElementById('sources-panel');
+const soundproofBox = document.getElementById('soundproof-box');
 const btnExport = document.getElementById('btn-export');
 const btnImport = document.getElementById('btn-import');
 const fileInput = document.getElementById('file-input');
@@ -225,7 +226,7 @@ async function getCachedVerdict(artist) {
     const entry = cache[artist.toLowerCase()];
     if (!entry) return null;
     if (Date.now() - entry.checkedAt > CACHE_MAX_AGE_MS) return null; // протухло, переспрашиваем
-    return entry;
+    if (entry.v !== 2) return null; // запись из старой версии (null тогда сохранялся как «human») — переспрашиваем
 }
 
 async function saveCachedVerdict(artist, isAI, reason, checkedAt = Date.now()) {
@@ -233,7 +234,7 @@ async function saveCachedVerdict(artist, isAI, reason, checkedAt = Date.now()) {
     const cache = data.aiVerdictCache || {};
     const maxSize = data.cacheSize || DEFAULT_CACHE_SIZE;
 
-    cache[artist.toLowerCase()] = { isAI, reason, checkedAt };
+    cache[artist.toLowerCase()] = { isAI, reason, v: 2, checkedAt };
     await chrome.storage.local.set({ aiVerdictCache: cache });
     await trimVerdictCache(maxSize);
 }
@@ -270,6 +271,7 @@ function render() {
     settingsPanel.style.display = 'none';
     infoPanel.style.display = 'none';
     list.style.display = '';
+    sourcesPanel.style.display = 'none';
     inputArea.style.display = 'none';
     subtypeGroup.style.display = 'none'; // радиокнопки Keywords/Songs/Artists показываем только на My Blocklist
     actionsRow.style.display = 'flex'; // по умолчанию видим, скрываем только на Settings
@@ -292,7 +294,9 @@ function render() {
 
     if (currentTab === 'ai') {
         inputArea.style.display = 'none';
-        fetchAIList(); 
+        list.style.display = 'none';
+        sourcesPanel.style.display = 'flex';
+        renderSourcesPanel();
         return;
     }
 
@@ -383,6 +387,7 @@ function renderInfoTab(forceRefresh = false) {
 
         infoTrackEl.textContent = isPlaying ? `${now.artist} - ${now.title}` : 'Nothing is playing';
         renderStats(res.stats);
+        renderSoundproofCard(isPlaying ? now.artist : null, forceRefresh);
 
         if (!isPlaying) {
             groqBox.innerHTML = '<div class="hint">Open YouTube Music to check the current artist.</div>';
@@ -583,6 +588,7 @@ function renderVerdict(artist, title, isAI, reason, fromCache, checkedAt, forceL
 
     groqBox.innerHTML = `
         <div class="groq-meta-row">
+            <span class="src-pill src-groq">Groq</span>
             <span class="groq-verdict-badge ${badgeClass}">${badgeText}</span>
             ${fromCache ? '<span class="groq-cached-label">(cached)</span>' : ''}
             <button class="groq-refresh-btn" title="Ask Groq again and replace the cached answer">↻ Refresh</button>
@@ -622,15 +628,63 @@ function renderGroqError(message) {
 
 // --- LOGIC ---
 
-function fetchAIList() {
-    list.innerHTML = '<li style="justify-content:center; color:#888;">Checking Database...</li>';
+// --- AI DB: карточки источников ---
 
-    chrome.runtime.sendMessage({ type: 'FETCH_AI_ARTISTS' })
+const SOURCES = [
+    {
+        id: 'zoundhub',
+        pill: 'ZoundHub',
+        name: 'ZoundHub',
+        desc: 'Curated list of AI artists. Used for the AI badge and auto-skip.'
+    },
+    {
+        id: 'soundproof',
+        pill: 'SoundProof',
+        name: 'Detect & Skip AI Music - SoundProof',
+        desc: 'Community votes per artist (read-only). Shown on the Info tab.'
+    }
+];
+
+// Время жизни кэша SoundProof (настраивается в карточке на AI DB). 0 = кэш выключен.
+const SP_TTL_OPTIONS = [
+    { label: 'Off', ms: 0 },
+    { label: '1H',  ms: 60 * 60 * 1000 },
+    { label: '6H',  ms: 6 * 60 * 60 * 1000 },
+    { label: '1D',  ms: 24 * 60 * 60 * 1000 },
+    { label: '3D',  ms: 3 * 24 * 60 * 60 * 1000 },
+    { label: '7D',  ms: 7 * 24 * 60 * 60 * 1000 }
+];
+const SP_TTL_DEFAULT_MS = 24 * 60 * 60 * 1000; // 1D
+
+async function getSoundproofTtl() {
+    const data = await chrome.storage.local.get(['soundproofCacheTtl']);
+    const v = data.soundproofCacheTtl;
+    return SP_TTL_OPTIONS.some(o => o.ms === v) ? v : SP_TTL_DEFAULT_MS;
+}
+
+async function getSourceEnabled() {
+    const data = await chrome.storage.local.get(['sourceEnabled']);
+    return { zoundhub: true, soundproof: true, ...(data.sourceEnabled || {}) };
+}
+
+async function setSourceEnabled(id, value) {
+    const current = await getSourceEnabled();
+    current[id] = value;
+    await chrome.storage.local.set({ sourceEnabled: current });
+}
+
+function setStat(el, html, isError) {
+    el.classList.toggle('error', !!isError);
+    el.innerHTML = html;
+}
+
+// ZoundHub: количество записей в базе
+function loadZoundhubStat(statEl) {
+    setStat(statEl, 'Loading…');
+    return chrome.runtime.sendMessage({ type: 'FETCH_AI_ARTISTS' })
         .then(result => {
             if (!result || !result.ok) throw new Error((result && result.error) || 'Unknown error');
-            return result.data;
-        })
-        .then(data => {
+            const data = result.data;
             let raw = [];
             if (Array.isArray(data)) raw = data;
             else if (data.artists) raw = data.artists;
@@ -639,24 +693,228 @@ function fetchAIList() {
             else if (data.items) raw = data.items;
             else raw = Object.values(data).flat();
 
-            const names = raw
+            const count = raw
                 .map(item => (typeof item === 'string') ? item : (item && item.removed !== true ? (item.name || item.artist || item.artist_name || item.artistName || item.title) : null))
-                .filter(n => typeof n === 'string' && n.trim().length > 0);
-            const count = names.length;
-            
-            list.innerHTML = `
-                <li style="display:block; text-align:center; padding-top:60px; border-bottom:none; pointer-events:none;">
-                    <div style="font-size:48px; font-weight:800; color:#ff4444; line-height:1;">${count}</div>
-                    <div style="font-size:12px; font-weight:bold; color:#aaa; margin-top:5px; text-transform:uppercase; letter-spacing:1px;">AI Artists Tracked</div>
-                    <div style="font-size:10px; color:#555; margin-top:20px;">Source: ZoundHub Database</div>
-                </li>
-            `;
-            
-            showStatus('Database Sync Active', '#4caf50');
+                .filter(n => typeof n === 'string' && n.trim().length > 0).length;
+
+            setStat(statEl, `Records in database: <b>${count.toLocaleString()}</b>`);
+            showStatus('ZoundHub: database synced', '#4caf50');
         })
-        .catch(e => {
-            list.innerHTML = `<li style="justify-content:center; color:#ff4444;">Connection Failed: ${e.message}</li>`;
-        });
+        .catch(e => setStat(statEl, 'Connection failed: ' + escapeHtml(e.message), true));
+}
+
+// SoundProof: записей «всей базы» нет (запрос идёт по одному артисту),
+// поэтому показываем число закэшированных проверок.
+async function loadSoundproofStat(statEl, extraNote) {
+    const data = await chrome.storage.local.get(['soundproofCache']);
+    const n = Object.keys(data.soundproofCache || {}).length;
+    setStat(statEl, `Cached artist lookups: <b>${n}</b>` + (extraNote ? ` · ${extraNote}` : ''));
+}
+
+async function reloadSoundproof(statEl) {
+    await chrome.storage.local.remove('soundproofCache');
+    setStat(statEl, 'Cache cleared. Checking service…');
+
+    const res = await chrome.storage.local.get(['nowPlaying']);
+    const artist = res.nowPlaying && res.nowPlaying.artist;
+    if (!artist) { await loadSoundproofStat(statEl, 'will refresh on the next track'); return; }
+
+    try {
+        await getSoundproof(artist, true);
+        await loadSoundproofStat(statEl, 'service reachable');
+        showStatus('SoundProof: reloaded', '#4caf50');
+    } catch (e) {
+        setStat(statEl, 'Connection failed: ' + escapeHtml(e.message), true);
+    }
+}
+
+async function renderSourcesPanel() {
+    const enabled = await getSourceEnabled();
+    sourcesPanel.innerHTML = '';
+
+    SOURCES.forEach(def => {
+        const card = document.createElement('div');
+        card.className = `source-card src-${def.id}` + (enabled[def.id] ? '' : ' disabled');
+        card.innerHTML = `
+            <input type="checkbox" title="Enable / disable this source" ${enabled[def.id] ? 'checked' : ''}>
+            <div class="source-main">
+                <span class="src-pill">${escapeHtml(def.pill)}</span>
+                <div class="source-name">${escapeHtml(def.name)}</div>
+                <div class="source-desc">${escapeHtml(def.desc)}</div>
+                <div class="source-stat">…</div>
+            </div>
+            <button class="source-reload" title="Reload this source">↻</button>
+        `;
+
+        const checkbox = card.querySelector('input[type="checkbox"]');
+        const statEl = card.querySelector('.source-stat');
+        const reloadBtn = card.querySelector('.source-reload');
+
+        checkbox.onchange = async () => {
+            await setSourceEnabled(def.id, checkbox.checked);
+            card.classList.toggle('disabled', !checkbox.checked);
+            showStatus(`${def.pill}: ${checkbox.checked ? 'enabled' : 'disabled'}`, checkbox.checked ? '#4caf50' : '#ff4444');
+        };
+
+        reloadBtn.onclick = () => {
+            if (def.id === 'zoundhub') loadZoundhubStat(statEl);
+            else reloadSoundproof(statEl);
+        };
+
+        if (def.id === 'soundproof') {
+            const row = document.createElement('div');
+            row.className = 'source-ttl-row';
+            row.innerHTML = '<span>Cache lifetime</span><select title="How long SoundProof answers are kept"></select>';
+            const select = row.querySelector('select');
+            SP_TTL_OPTIONS.forEach(o => {
+                const opt = document.createElement('option');
+                opt.value = String(o.ms);
+                opt.textContent = o.label;
+                select.appendChild(opt);
+            });
+            getSoundproofTtl().then(ms => { select.value = String(ms); });
+
+            select.onchange = async () => {
+                const ms = Number(select.value);
+                await chrome.storage.local.set({ soundproofCacheTtl: ms });
+                if (ms === 0) await chrome.storage.local.remove('soundproofCache'); // «Off» — старые ответы не держим
+                const label = SP_TTL_OPTIONS.find(o => o.ms === ms).label;
+                showStatus(`SoundProof cache: ${label}`, '#4caf50');
+                loadSoundproofStat(statEl);
+            };
+            card.querySelector('.source-main').appendChild(row);
+        }
+
+        sourcesPanel.appendChild(card);
+
+        if (def.id === 'zoundhub') loadZoundhubStat(statEl);
+        else loadSoundproofStat(statEl);
+    });
+}
+
+// --- SoundProof (Info tab) ---
+
+async function getSoundproof(artist, force) {
+    const key = artist.toLowerCase().trim();
+    const ttlMs = await getSoundproofTtl(); // срок берём из текущей настройки — смена применяется и к уже сохранённым ответам
+
+    if (!force && ttlMs > 0) {
+        const stored = await chrome.storage.local.get(['soundproofCache']);
+        const entry = (stored.soundproofCache || {})[key];
+        if (entry && Date.now() - entry.checkedAt < ttlMs) {
+            return { data: entry.data, cached: true, checkedAt: entry.checkedAt };
+        }
+    }
+
+    const ask = async (name) => {
+        const res = await chrome.runtime.sendMessage({ type: 'FETCH_SOUNDPROOF', artist: name });
+        if (!res || !res.ok) throw new Error((res && res.error) || 'No response');
+        return res.data;
+    };
+
+    let data = await ask(artist);
+
+    // «A, B» — у SoundProof ключом служит первый исполнитель из плеера.
+    if (data.human + data.ai === 0 && artist.includes(',')) {
+        const first = artist.split(/\s*,\s*/)[0];
+        if (first && first.toLowerCase() !== key) {
+            try {
+                const d2 = await ask(first);
+                if (d2.human + d2.ai > 0) data = d2;
+            } catch (e) { /* оставляем исходный ответ */ }
+        }
+    }
+
+    const checkedAt = Date.now();
+    if (ttlMs === 0) return { data, cached: false, checkedAt }; // кэш выключен — ничего не сохраняем
+
+    const stored = await chrome.storage.local.get(['soundproofCache']);
+    const cache = stored.soundproofCache || {};
+    cache[key] = { data, checkedAt };
+
+    const keys = Object.keys(cache);
+    if (keys.length > 500) {
+        keys.sort((x, y) => cache[x].checkedAt - cache[y].checkedAt);
+        for (let i = 0; i < keys.length - 500; i++) delete cache[keys[i]];
+    }
+    await chrome.storage.local.set({ soundproofCache: cache });
+
+    return { data, cached: false, checkedAt };
+}
+
+let spRequestId = 0;
+let spRenderedArtist = null;
+
+async function renderSoundproofCard(artist, force) {
+    const enabled = await getSourceEnabled();
+    if (!artist || !enabled.soundproof) {
+        spRequestId++;
+        spRenderedArtist = null;
+        soundproofBox.style.display = 'none';
+        soundproofBox.innerHTML = '';
+        return;
+    }
+
+    // Info перерисовывается и при смене статистики — не мигаем, если артист тот же.
+    if (!force && spRenderedArtist === artist && soundproofBox.innerHTML) return;
+
+    const myId = ++spRequestId;
+    soundproofBox.style.display = 'block';
+    soundproofBox.innerHTML = `
+        <div class="groq-loading">
+            <span class="src-pill src-soundproof">SoundProof</span>
+            <span class="groq-spinner"></span>
+            <span>Checking community votes...</span>
+        </div>`;
+
+    try {
+        const { data, cached, checkedAt } = await getSoundproof(artist, force);
+        if (myId !== spRequestId) return;
+        spRenderedArtist = artist;
+        drawSoundproof(data, cached, checkedAt);
+    } catch (e) {
+        if (myId !== spRequestId) return;
+        spRenderedArtist = null;
+        soundproofBox.innerHTML = `
+            <div class="groq-meta-row"><span class="src-pill src-soundproof">SoundProof</span></div>
+            <div class="hint" style="color:#ff4444;">SoundProof check failed: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function drawSoundproof(data, cached, checkedAt) {
+    const { human, ai, verified } = data;
+    const total = human + ai;
+
+    let badgeClass = 'unknown', badgeText = 'NO DATA', pct = 0, isAI = false;
+    if (verified) {
+        isAI = ai > human;
+        badgeClass = isAI ? 'is-ai' : 'not-ai';
+        badgeText = isAI ? 'AI' : 'HUMAN';
+        pct = total ? Math.round((Math.max(ai, human) / total) * 100) : 100;
+    } else if (total > 0) {
+        isAI = ai > human;
+        pct = Math.round((Math.max(ai, human) / total) * 100);
+        const lean = pct < 75 || total <= 5; // те же пороги, что описаны в README SoundProof
+        badgeClass = lean ? (isAI ? 'lean-ai' : 'lean-human') : (isAI ? 'is-ai' : 'not-ai');
+        badgeText = (lean ? 'LEAN ' : '') + (isAI ? 'AI' : 'HUMAN');
+    }
+
+    const humanPct = total ? (human / total) * 100 : 0;
+    const aiPct = total ? (ai / total) * 100 : 0;
+
+    soundproofBox.innerHTML = `
+        <div class="groq-meta-row">
+            <span class="src-pill src-soundproof">SoundProof</span>
+            <span class="groq-verdict-badge ${badgeClass}">${badgeText}</span>
+            ${cached ? '<span class="groq-cached-label">(cached)</span>' : ''}
+        </div>
+        ${total === 0
+            ? '<div class="hint">Nobody has voted on this artist yet.</div>'
+            : `<div class="sp-bar"><div class="h" style="width:${humanPct}%"></div><div class="a" style="width:${aiPct}%"></div></div>
+               <div class="sp-line"><span>Human <b>${human}</b></span><span><b>${pct}%</b> ${isAI ? 'AI' : 'Human'}</span><span>AI <b>${ai}</b></span></div>`}
+        ${verified ? '<div class="sp-verified">✓ Verified by SoundProof moderators</div>' : ''}
+        <div class="groq-timestamp" style="margin:6px 0 0;">Checked: ${escapeHtml(formatCheckedAt(checkedAt))}</div>
+    `;
 }
 
 function addItem() {
@@ -720,11 +978,6 @@ subtypeRadios.forEach(radio => {
 
 addBtn.onclick = addItem;
 input.addEventListener('keypress', e => { if(e.key === 'Enter') addItem(); });
-
-btnRefresh.onclick = () => {
-    if(currentTab === 'ai') fetchAIList();
-    else render();
-};
 
 btnExport.onclick = () => {
     chrome.storage.local.get(null, (data) => {
