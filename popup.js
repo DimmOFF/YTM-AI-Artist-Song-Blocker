@@ -46,6 +46,7 @@ const cacheSizeInput = document.getElementById('cache-size-input');
 const infoPanel = document.getElementById('info-panel');
 const infoTrackEl = document.getElementById('info-track');
 const groqBox = document.getElementById('groq-box');
+const socialBox = document.getElementById('social-box');
 const statTodayEl = document.getElementById('stat-today');
 const statTotalEl = document.getElementById('stat-total');
 const statSinceEl = document.getElementById('stat-since');
@@ -439,12 +440,14 @@ function renderInfoTab(forceRefresh = false) {
         renderSoundproofCard(isPlaying ? now.artist : null, forceRefresh);
 
         if (!isPlaying) {
+            clearSocialBox();
             groqBox.innerHTML = '<div class="hint">Open YouTube Music to check the current artist.</div>';
             return;
         }
 
         const apiKey = res.groqApiKey;
         if (!apiKey) {
+            clearSocialBox();
             groqBox.innerHTML = '<div class="hint">Artist info is not available. Add Groq API key in Settings.</div>';
             return;
         }
@@ -460,6 +463,7 @@ function renderInfoTab(forceRefresh = false) {
             return;
         }
 
+        clearSocialBox();
         groqBox.innerHTML = `
             <div class="groq-loading">
                 <span class="groq-spinner"></span>
@@ -589,6 +593,13 @@ function buildSocialLinks(artist, verified) {
 
 let socialRequestId = 0;
 
+// Прячет карточку соцсетей и отменяет ещё не завершённые запросы ссылок.
+function clearSocialBox() {
+    socialRequestId++;
+    socialBox.style.display = 'none';
+    socialBox.innerHTML = '';
+}
+
 async function loadSocialLinks(artist, title, force) {
     const myId = ++socialRequestId;
     const stillRelevant = () => myId === socialRequestId && groqBox.querySelector('.groq-meta-row');
@@ -596,14 +607,15 @@ async function loadSocialLinks(artist, title, force) {
     // note — короткая подпись под иконками: чем закончился поиск ссылок.
     const attach = (links, note) => {
         if (!stillRelevant()) return;
-        groqBox.querySelectorAll('.groq-social-row, .groq-social-note').forEach(el => el.remove());
-        groqBox.appendChild(buildSocialLinks(artist, links));
+        socialBox.innerHTML = '';
+        socialBox.appendChild(buildSocialLinks(artist, links));
         if (note) {
             const n = document.createElement('div');
             n.className = 'groq-social-note';
             n.textContent = note;
-            groqBox.appendChild(n);
+            socialBox.appendChild(n);
         }
+        socialBox.style.display = 'block';
     };
 
     const describe = (links, found) => {
@@ -647,6 +659,9 @@ function renderVerdict(artist, title, isAI, reason, fromCache, checkedAt, forceL
     `;
 
     groqBox.querySelector('.groq-refresh-btn').onclick = () => renderInfoTab(true);
+    // Карточка соцсетей живёт отдельно от вердикта: сбрасываем старую, пока грузится новая
+    socialBox.style.display = 'none';
+    socialBox.innerHTML = '';
 
     if (isAI === true) {
         const banBtn = document.createElement('button');
@@ -664,6 +679,7 @@ function renderVerdict(artist, title, isAI, reason, fromCache, checkedAt, forceL
 // про превышение лимита запросов в минуту/день), так что сюда приходит
 // уже готовый для показа текст, не сырой JSON.
 function renderGroqError(message) {
+    clearSocialBox();
     groqBox.innerHTML = `
         <div class="hint" style="color:#ff4444;">Groq check failed: ${escapeHtml(message)}</div>
     `;
@@ -920,7 +936,7 @@ async function renderSoundproofCard(artist, force) {
         const { data, cached, checkedAt } = await getSoundproof(artist, force);
         if (myId !== spRequestId) return;
         spRenderedArtist = artist;
-        drawSoundproof(data, cached, checkedAt);
+        drawSoundproof(artist, data, cached, checkedAt);
     } catch (e) {
         if (myId !== spRequestId) return;
         spRenderedArtist = null;
@@ -930,8 +946,8 @@ async function renderSoundproofCard(artist, force) {
     }
 }
 
-function drawSoundproof(data, cached, checkedAt) {
-    const { human, ai, verified } = data;
+function drawSoundproof(artist, data, cached, checkedAt) {
+    const { human, ai, verified, myVote } = data;
     const total = human + ai;
 
     let badgeClass = 'unknown', badgeText = 'NO DATA', pct = 0, isAI = false;
@@ -956,6 +972,10 @@ function drawSoundproof(data, cached, checkedAt) {
             <span class="src-pill src-soundproof">SoundProof</span>
             <span class="groq-verdict-badge ${badgeClass}">${badgeText}</span>
             ${cached ? '<span class="groq-cached-label">(cached)</span>' : ''}
+            <span class="sp-vote-group">
+                <button class="sp-vote-btn human${myVote === 'human' ? ' voted' : ''}" data-vote="human" ${verified ? 'disabled' : ''} title="${verified ? 'Voting is closed for verified artists' : 'Vote: this artist is human'}">Human</button>
+                <button class="sp-vote-btn ai${myVote === 'ai' ? ' voted' : ''}" data-vote="ai" ${verified ? 'disabled' : ''} title="${verified ? 'Voting is closed for verified artists' : 'Vote: this artist is AI'}">AI</button>
+            </span>
         </div>
         ${total === 0
             ? '<div class="hint">Nobody has voted on this artist yet.</div>'
@@ -964,6 +984,43 @@ function drawSoundproof(data, cached, checkedAt) {
         ${verified ? '<div class="sp-verified">✓ Verified by SoundProof moderators</div>' : ''}
         <div class="groq-timestamp" style="margin:6px 0 0;">Checked: ${escapeHtml(formatCheckedAt(checkedAt))}</div>
     `;
+
+    soundproofBox.querySelectorAll('.sp-vote-btn').forEach(btn => {
+        btn.onclick = () => castSoundproofVote(artist, btn.dataset.vote);
+    });
+}
+
+// Голосование (только по клику). После голоса принудительно перечитываем статус,
+// чтобы показать актуальные числа и выбранную кнопку.
+function setVoteNote(text, isError) {
+    let note = soundproofBox.querySelector('.sp-vote-note');
+    if (!note) {
+        note = document.createElement('div');
+        const stamp = soundproofBox.querySelector('.groq-timestamp');
+        soundproofBox.insertBefore(note, stamp || null);
+    }
+    note.className = 'sp-vote-note' + (isError ? ' error' : '');
+    note.textContent = text;
+}
+
+async function castSoundproofVote(artist, vote) {
+    const myId = ++spRequestId;
+    soundproofBox.querySelectorAll('.sp-vote-btn').forEach(b => { b.disabled = true; });
+    setVoteNote('Sending vote...', false);
+
+    try {
+        const res = await chrome.runtime.sendMessage({ type: 'SOUNDPROOF_VOTE', artist, vote });
+        if (!res || !res.ok) throw new Error((res && res.error) || 'No response');
+
+        const fresh = await getSoundproof(artist, true);
+        if (myId !== spRequestId) return;
+        drawSoundproof(artist, fresh.data, false, fresh.checkedAt);
+        showStatus('SoundProof: vote sent', '#4caf50');
+    } catch (e) {
+        if (myId !== spRequestId) return;
+        soundproofBox.querySelectorAll('.sp-vote-btn').forEach(b => { b.disabled = false; });
+        setVoteNote('Vote failed: ' + e.message, true);
+    }
 }
 
 function addItem() {

@@ -138,8 +138,20 @@
     .sp-bar .a { background: #ff4d4d; }
     .sp-line { display: flex; justify-content: space-between; font-size: 11px; color: #aaa; }
     .sp-line b { color: #fff; }
+    /* Компактные кнопки голосования — в стиле остальных кнопок расширения (#333, 10px) */
+    .sp-vote-group { margin-left: auto; display: flex; gap: 4px; }
+    .sp-vote-btn { padding: 3px 9px; background: #333; border: 1px solid transparent; color: #ccc; font-size: 10px; cursor: pointer; border-radius: 4px; transition: 0.15s; }
+    .sp-vote-btn.human:hover:not(:disabled) { background: rgba(76, 175, 80, 0.18); color: #4caf50; }
+    .sp-vote-btn.ai:hover:not(:disabled) { background: rgba(255, 77, 77, 0.18); color: #ff4d4d; }
+    .sp-vote-btn.human.voted { background: rgba(76, 175, 80, 0.18); color: #4caf50; border-color: #4caf50; }
+    .sp-vote-btn.ai.voted { background: rgba(255, 77, 77, 0.18); color: #ff4d4d; border-color: #ff4d4d; }
+    .sp-vote-btn:disabled { opacity: 0.4; cursor: default; }
+    .sp-vote-note { font-size: 10px; color: #888; margin-top: 6px; }
+    .sp-vote-note.error { color: #ff4444; }
     .sp-verified { color: #4caf50; font-size: 10px; margin-top: 4px; }
 
+    /* Иконки соцсетей — отдельная карточка: рамка/отступ у строки внутри уже не нужны */
+    .social-box .groq-social-row { margin-top: 0; padding-top: 0; border-top: none; }
     .groq-social-note { font-size: 10px; color: #666; margin-top: 6px; }
     .groq-social-link.search { background: transparent; border: 1px dashed #555; color: #888; box-sizing: border-box; }
     .groq-social-link.search:hover { border-color: #888; color: #ddd; }
@@ -190,6 +202,8 @@
     </div>
 
     <div class="groq-box soundproof-box src-soundproof" id="soundproof-box" style="display:none;"></div>
+
+    <div class="groq-box social-box" id="social-box" style="display:none;"></div>
 
     <div class="stats-box">
       <div class="stat-row">

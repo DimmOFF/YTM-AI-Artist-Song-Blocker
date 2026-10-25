@@ -398,14 +398,33 @@ async function updateBlockList() {
 
 // «Целое слово» с поддержкой Unicode: \b в JS видит только ASCII, поэтому кириллица
 // и названия со скобками/знаками по краям (напр. "Song (feat. X)") никогда не совпадали.
+// Раньше на КАЖДЫЙ термин при КАЖДОМ вызове создавался новый RegExp с unicode-флагом.
+// При тысячах записей в AI-базе и сотне строк на странице это блокировало главный поток
+// на секунды (интерфейс YouTube Music подвисал при скролле и загрузке списков).
+// Теперь: сначала дешёвая проверка includes(), а регулярка (скомпилированная один раз,
+// кэшируется) строится только для терминов, которые вообще встречаются в тексте.
+const termRegexCache = new Map();
+
+function matchesTermLowered(lowerText, term) {
+    if (!lowerText.includes(term.toLowerCase())) return false;
+
+    let regex = termRegexCache.get(term);
+    if (!regex) {
+        const safeTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        regex = new RegExp(`(?<![\\p{L}\\p{N}_])${safeTerm}(?![\\p{L}\\p{N}_])`, 'iu');
+        if (termRegexCache.size > 20000) termRegexCache.clear(); // защита от неограниченного роста
+        termRegexCache.set(term, regex);
+    }
+    return regex.test(lowerText);
+}
+
 function matchesTerm(text, term) {
-    const safeTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`(?<![\\p{L}\\p{N}_])${safeTerm}(?![\\p{L}\\p{N}_])`, 'iu');
-    return regex.test(text);
+    return matchesTermLowered(text.toLowerCase(), term);
 }
 
 function findWholeWordMatch(text, list) {
-    return list.find(term => matchesTerm(text, term));
+    const lower = text.toLowerCase();
+    return list.find(term => matchesTermLowered(lower, term));
 }
 
 function skipTrack(expectedSong) {
@@ -1082,8 +1101,14 @@ async function init() {
     playerBar.addEventListener("click", onPlayerBarClick, true);
     document.addEventListener("keydown", onGlobalKeyDown, true);
 
+    // Прогресс-бар и таймер внутри player bar меняются каждую секунду — не гоняем
+    // checkAndSkip на каждую мутацию, а сворачиваем их в один вызов раз в 200 мс.
+    let checkQueued = false;
     const observer = new MutationObserver(() => {
-        checkAndSkip(); 
+        if (!checkQueued) {
+            checkQueued = true;
+            setTimeout(() => { checkQueued = false; checkAndSkip(); }, 200);
+        }
         if (engineEnabled && !document.getElementById("ytm-ward-controls")) injectButtons();
     });
     observer.observe(playerBar, { subtree: true, childList: true, attributes: true });

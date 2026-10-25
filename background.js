@@ -397,7 +397,8 @@ Rules for JSON fields:
 // по исполнителю и флаг verified. Голосование из этого расширения не
 // выполняется. Ключ — публичный (publishable) ключ клиента SoundProof;
 // данные принадлежат сервису SoundProof.
-const SOUNDPROOF_URL = 'https://solsneywdlhvwbtghopw.supabase.co/rest/v1/rpc/get_artist_status';
+const SOUNDPROOF_RPC = 'https://solsneywdlhvwbtghopw.supabase.co/rest/v1/rpc/';
+const SOUNDPROOF_URL = SOUNDPROOF_RPC + 'get_artist_status';
 const SOUNDPROOF_KEY = 'sb_publishable_dlFufI-1QXA4VJdGoMWxMw_ouWHyl3k';
 const SOUNDPROOF_PLATFORM = 'music'; // так SoundProof называет YouTube Music
 
@@ -417,8 +418,26 @@ async function fetchSoundproofStatus(artist) {
     return {
         human: Number(row.out_human) || 0,
         ai: Number(row.out_ai) || 0,
-        verified: row.out_verified === true
+        verified: row.out_verified === true,
+        myVote: row.my_current_vote === 'human' || row.my_current_vote === 'ai' ? row.my_current_vote : null
     };
+}
+
+// Голос пользователя. Вызывается только по клику на кнопку Human / AI в карточке
+// SoundProof (Info). Параметры — как в оригинальном клиенте SoundProof; кто именно
+// голосует, определяет сервер, никаких учётных данных мы не отправляем.
+async function castSoundproofVote(artist, type) {
+    if (type !== 'human' && type !== 'ai') throw new Error('Invalid vote type');
+    const response = await fetch(SOUNDPROOF_RPC + 'handle_vote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SOUNDPROOF_KEY },
+        body: JSON.stringify({ artist_id_input: String(artist).trim(), vote_type_input: type, platform_input: SOUNDPROOF_PLATFORM })
+    });
+    if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        console.warn('[YTM Ward] SoundProof vote HTTP', response.status, body.slice(0, 200));
+        throw new Error(`SoundProof HTTP ${response.status}`);
+    }
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -432,6 +451,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message && message.type === 'FETCH_SOUNDPROOF') {
         fetchSoundproofStatus(message.artist)
             .then(data => sendResponse({ ok: true, data }))
+            .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
+        return true;
+    }
+
+    if (message && message.type === 'SOUNDPROOF_VOTE') {
+        castSoundproofVote(message.artist, message.vote)
+            .then(() => sendResponse({ ok: true }))
             .catch(err => sendResponse({ ok: false, error: err.message || String(err) }));
         return true;
     }
