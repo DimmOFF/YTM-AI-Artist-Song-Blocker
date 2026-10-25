@@ -700,13 +700,13 @@ const SOURCES = [
         id: 'zoundhub',
         pill: 'ZoundHub',
         name: 'ZoundHub',
-        desc: 'Curated list of AI artists. Used for the AI badge and auto-skip.'
+        desc: 'Curated list of AI artists for badge and auto-skip.'
     },
     {
         id: 'soundproof',
         pill: 'SoundProof',
         name: 'Detect & Skip AI Music - SoundProof',
-        desc: 'Community votes per artist. Shown on the Info tab and checked at track start (badge / auto-skip).'
+        desc: 'Community votes per artist: Info, badge, auto-skip.'
     }
 ];
 
@@ -851,9 +851,9 @@ async function renderSourcesPanel() {
 
             // Правила автоскипа по голосам (по умолчанию 50% и 3 голоса)
             const rules = document.createElement('div');
-            rules.className = 'source-ttl-row';
-            rules.title = 'Lead = (AI votes − Human votes) / all votes. A 50% lead equals 75% AI votes. Verified artists always count as decisive.';
-            rules.innerHTML = '<span>Auto-skip: AI lead ≥</span><input type="number" min="1" max="100" step="1" data-k="threshold"><span>% · min votes</span><input type="number" min="1" max="999" step="1" data-k="minVotes">';
+            rules.className = 'source-ttl-row source-rules-row';
+            rules.title = 'Skip when AI lead ≥ the percentage and the artist has at least this many votes. Lead = (AI votes − Human votes) / all votes, so a 50% lead equals 75% AI votes. Verified artists always count as decisive.';
+            rules.innerHTML = '<span>Auto-skip: lead ≥</span><input type="number" min="1" max="100" step="1" data-k="threshold"><span>% · votes ≥</span><input type="number" min="1" max="999" step="1" data-k="minVotes">';
             const thInput = rules.querySelector('[data-k="threshold"]');
             const mvInput = rules.querySelector('[data-k="minVotes"]');
             chrome.storage.local.get(['soundproofThreshold', 'soundproofMinVotes']).then(d => {
