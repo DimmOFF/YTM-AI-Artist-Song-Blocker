@@ -1,4 +1,4 @@
-const REMOTE_URL = 'https://zoundhub.com/api/artists/all';
+const REMOTE_URL = 'https://zoundhub.com/data/artists-all.json';
 
 async function fetchArtists() {
     const response = await fetch(REMOTE_URL, { cache: 'no-store' });
