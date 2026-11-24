@@ -60,6 +60,13 @@ let aiActions = { ...DEFAULT_AI_ACTIONS };
 
 let engineEnabled = true;
 
+// After an extension reload/update the old content script keeps running in an
+// already open tab and every chrome.* call throws "Extension context invalidated".
+// This check keeps the periodic timers from spamming the page console.
+function extensionAlive() {
+    try { return !!chrome.runtime?.id; } catch (e) { return false; }
+}
+
 let dislikedTracksThisSession = new Set();
 function trackKey(song) { return `${song.artist}||${song.title}`; }
 
@@ -782,6 +789,7 @@ function scheduleBadgeUpdate() {
 
         // NEW: write the current track to storage — the Info tab in the popup reads it
         // (popup.js has no access to the page DOM, only to chrome.storage).
+        if (!extensionAlive()) return;
         chrome.storage.local.set({
             nowPlaying: { artist: song.artist, title: song.title, aiMatch, whitelisted, isPaused: song.isPaused, updatedAt: Date.now() }
         });
@@ -792,6 +800,7 @@ function scheduleBadgeUpdate() {
 // AI database (not manual Keywords/Songs/Artists), at the moment the extension
 // ITSELF initiates a skip/dislike because an AI artist was detected.
 async function recordAIBlock() {
+    if (!extensionAlive()) return;
     const data = await chrome.storage.local.get(['stats']);
     const stats = data.stats || { totalBlocked: 0, dailyBlocked: {}, firstBlockedAt: null };
 
