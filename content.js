@@ -55,7 +55,9 @@ async function checkSoundproof(artist) {
 
 let lastProcessedSong = ""; 
 
-const DEFAULT_AI_ACTIONS = { label: true, dislike: true, skipAi: false };
+// Должно совпадать с DEFAULT_AI_ACTIONS в popup.js: если ключа aiActions в
+// хранилище нет (старая установка), попап и движок иначе показывают разное.
+const DEFAULT_AI_ACTIONS = { label: true, dislike: false, skipAi: true };
 let aiActions = { ...DEFAULT_AI_ACTIONS };
 
 let engineEnabled = true;
@@ -1249,6 +1251,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     }
 
     if (changes.aiActions) {
+        clearTimeout(pendingActionTimer); // иначе запланированный дизлайк сработает уже после выключения настройки
         loadAIActions().then(() => {
             // NEW: сброс "уже обработан" — иначе трек, который уже проверялся
             // при старых настройках, не пересчитается заново под новые
