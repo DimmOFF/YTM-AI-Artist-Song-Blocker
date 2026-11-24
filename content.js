@@ -55,9 +55,7 @@ async function checkSoundproof(artist) {
 
 let lastProcessedSong = ""; 
 
-// Должно совпадать с DEFAULT_AI_ACTIONS в popup.js: если ключа aiActions в
-// хранилище нет (старая установка), попап и движок иначе показывают разное.
-const DEFAULT_AI_ACTIONS = { label: true, dislike: false, skipAi: true };
+// Дефолты — в defaults.js (общий файл для попапа и движка).
 let aiActions = { ...DEFAULT_AI_ACTIONS };
 
 let engineEnabled = true;
@@ -745,6 +743,13 @@ function scheduleDislikeAndSkipCheck(song) {
     }, ACTION_DELAY_MS);
 }
 
+// Реакция на заблокированный (ручной список) трек — та же, что выбрана
+// в настройках для AI: дизлайк, если он включён, иначе скип, если включён он.
+function performConfiguredAction(song) {
+    if (aiActions.dislike) handleDislikeAndSkip(song);
+    else if (aiActions.skipAi) skipTrack();
+}
+
 function scheduleManualBlockCheck(song, matchedTerm) {
     clearTimeout(pendingActionTimer);
     pendingActionTimer = setTimeout(() => {
@@ -754,7 +759,7 @@ function scheduleManualBlockCheck(song, matchedTerm) {
             return;
         }
        console.log(`[YTM Ward] 🛑 BLOCKED (manual list): term="${matchedTerm}" | artist="${current.artist}" | title="${current.title}"`);
-       handleDislikeAndSkip(current);
+       performConfiguredAction(current);
     }, ACTION_DELAY_MS);
 }
 
@@ -835,10 +840,9 @@ function waitForTitleChange(prevTitle, timeoutMs) {
 // Dislike AI and Skip / Skip AI). Если действия выключены — «назад» работает как обычно.
 function wouldAutoHandle(song) {
     if (isWhitelistedSong(song)) return false; // Whitelist главнее любых блокировок
-    const checkString = (song.artist + " " + song.title).toLowerCase();
-    if (findWholeWordMatch(checkString, blockList)) return true;
+    const manualBlocked = !!findWholeWordMatch((song.artist + " " + song.title).toLowerCase(), blockList);
     const aiMatch = findWholeWordMatch(song.artist.toLowerCase(), aiArtistList) || isSoundproofFlagged(song);
-    return !!aiMatch && (aiActions.dislike || aiActions.skipAi);
+    return (manualBlocked || !!aiMatch) && (aiActions.dislike || aiActions.skipAi);
 }
 
 async function backSeekFlow(originSong) {
@@ -1146,7 +1150,7 @@ async function addToBlockList(term, listName, songAtClick) {
         await refreshManualBlockList(); 
         const currentSong = getSongInfo();
         if (songAtClick && currentSong && currentSong.title === songAtClick.title) {
-             handleDislikeAndSkip(getSongInfo());
+             performConfiguredAction(getSongInfo());
         } else {
             scheduleScan(); 
         }

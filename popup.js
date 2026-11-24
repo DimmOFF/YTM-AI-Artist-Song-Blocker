@@ -57,8 +57,6 @@ const CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
 // Master on/off switch
 const engineToggle = document.getElementById('engine-toggle');
 
-const DEFAULT_AI_ACTIONS = { label: true, dislike: false, skipAi: true };
-
 let currentTab = 'info';
 let currentMode = 'block';       // block | white — переключатель Blocklist / Whitelist внутри вкладки My List
 let currentSubType = 'keywords'; // keywords | songs | artists — выбирается радиокнопками внутри вкладки My List
