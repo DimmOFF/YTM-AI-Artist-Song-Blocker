@@ -485,7 +485,7 @@ function skipTrack(expectedSong) {
     const songBeforeSkip = getSongInfo();
 
     if (expectedSong && songBeforeSkip && songBeforeSkip.title !== expectedSong.title) {
-        console.log(`[YTM Ward] Трек уже сменился сам, пока ждали действия ("${expectedSong.title}" → "${songBeforeSkip.title}") — skip отменён.`);
+        console.log(`[YTM Ward] Track changed on its own while waiting for the action ("${expectedSong.title}" → "${songBeforeSkip.title}") — skip cancelled.`);
         return;
     }
 
@@ -738,7 +738,7 @@ function scheduleDislikeAndSkipCheck(song) {
             console.log(`[YTM Ward] Track changed during the delay — action for "${song.title}" cancelled.`);
             return;
         }
-        console.log(`[YTM Ward] 🤖 AI detected (Dislike AI and Skip, после ${ACTION_DELAY_MS}мs) — artist="${current.artist}"`);
+        console.log(`[YTM Ward] 🤖 AI detected (Dislike AI and Skip, after ${ACTION_DELAY_MS}ms) — artist="${current.artist}"`);
         recordAIBlock();
         handleDislikeAndSkip(current);
     }, ACTION_DELAY_MS);

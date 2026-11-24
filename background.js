@@ -365,7 +365,7 @@ Rules for JSON fields:
             if (!RETRYABLE_STATUSES.has(err.status) || isLastAttempt) {
                 throw err; // not a transient error, or attempts exhausted
             }
-            console.warn(`[YTM Ward] Groq ${err.status} — повтор ${attempt}/${MAX_ATTEMPTS - 1}...`);
+            console.warn(`[YTM Ward] Groq ${err.status} — retry ${attempt}/${MAX_ATTEMPTS - 1}...`);
             await sleep(RETRY_DELAY_MS[attempt - 1]);
         }
     }
@@ -380,7 +380,7 @@ Rules for JSON fields:
     try {
         parsed = JSON.parse(cleaned);
     } catch (e) {
-        throw new Error('Groq вернул не-JSON ответ');
+        throw new Error('Groq returned a non-JSON response');
     }
 
     // true / false / null — null ("not sure") is no longer turned into false.
