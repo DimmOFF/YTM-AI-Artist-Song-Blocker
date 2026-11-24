@@ -3,7 +3,7 @@
  * Created by Spirit Flame modified by DimmOFF
  */
 
-// Версия берётся из manifest.json — вручную в popup.html её больше править не нужно
+// Version comes from manifest.json — no need to edit it by hand in popup.html anymore
 document.getElementById('version').textContent = 'v' + chrome.runtime.getManifest().version;
 
 // DOM Elements
@@ -52,14 +52,14 @@ const statTotalEl = document.getElementById('stat-total');
 const statSinceEl = document.getElementById('stat-since');
 
 const DEFAULT_CACHE_SIZE = 100;
-const CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
+const CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 // Master on/off switch
 const engineToggle = document.getElementById('engine-toggle');
 
 let currentTab = 'info';
-let currentMode = 'block';       // block | white — переключатель Blocklist / Whitelist внутри вкладки My List
-let currentSubType = 'keywords'; // keywords | songs | artists — выбирается радиокнопками внутри вкладки My List
+let currentMode = 'block';       // block | white — Blocklist / Whitelist switch inside the My List tab
+let currentSubType = 'keywords'; // keywords | songs | artists — picked by the radio buttons inside the My List tab
 
 const KEYS_BY_MODE = {
     block: {
@@ -99,14 +99,14 @@ function getDisplayText(item) {
     return JSON.stringify(item);
 }
 
-// Текст записи для сравнения: у трека — title (так же матчится в content.js), иначе сама строка.
+// Text used to compare entries: the title for a track (matched the same way in content.js), otherwise the string itself.
 function termText(item) {
     const v = (item && typeof item === 'object') ? item.title : item;
     return typeof v === 'string' ? v.trim().toLowerCase() : '';
 }
 
-// Удаляет из указанных списков записи с таким же текстом (без учёта регистра).
-// Blocklist и Whitelist не должны содержать одну и ту же запись одновременно.
+// Removes entries with the same text (case-insensitive) from the given lists.
+// Blocklist and Whitelist must not contain the same entry at the same time.
 async function removeFromLists(keys, text) {
     const target = String(text || '').trim().toLowerCase();
     if (!target) return 0;
@@ -151,8 +151,8 @@ engineToggle.addEventListener('change', () => {
 
 // --- SETTINGS TAB ---
 
-// Skip AI визуально "выключен", когда Dislike AI and Skip включена —
-// он всё равно игнорируется в этом случае (см. content.js: checkAndSkip).
+// Skip AI is visually "off" when Dislike AI and Skip is enabled —
+// it is ignored in that case anyway (see content.js: checkAndSkip).
 function updateSkipAiAvailability() {
     const ignored = optDislike.checked;
     optSkipAi.disabled = ignored;
@@ -196,8 +196,8 @@ function loadGroqKeyUI() {
         if (res.groqApiKey) {
             groqKeyInputRow.style.display = 'none';
             groqKeySavedRow.style.display = 'flex';
-            groqKeyGenerateBtn.style.display = 'none'; // ключ уже есть — кнопка не нужна
-            cacheSizeRow.style.display = 'flex';        // настройка кэша видна только если есть ключ
+            groqKeyGenerateBtn.style.display = 'none'; // key already saved — button not needed
+            cacheSizeRow.style.display = 'flex';        // cache setting only shown when a key exists
         } else {
             groqKeyInputRow.style.display = 'flex';
             groqKeySavedRow.style.display = 'none';
@@ -245,11 +245,11 @@ cacheSizeInput.addEventListener('change', () => {
     cacheSizeInput.value = size;
     chrome.storage.local.set({ cacheSize: size }, () => {
         showStatus(`Cache size set to ${size} artists.`, '#4caf50');
-        trimVerdictCache(size); // сразу подрезаем, если новый лимит меньше текущего размера кэша
+        trimVerdictCache(size); // trim right away if the new limit is below the current cache size
     });
 });
 
-// --- VERDICT CACHE (artist-only key, 30 дней) ---
+// --- VERDICT CACHE (artist-only key, 30 days) ---
 
 async function trimVerdictCache(maxSize) {
     const data = await chrome.storage.local.get(['aiVerdictCache']);
@@ -257,7 +257,7 @@ async function trimVerdictCache(maxSize) {
     const keys = Object.keys(cache);
     if (keys.length <= maxSize) return;
 
-    // убираем самые старые записи (по checkedAt), пока не впишемся в лимит
+    // drop the oldest entries (by checkedAt) until we fit the limit
     keys.sort((a, b) => (cache[a].checkedAt || 0) - (cache[b].checkedAt || 0));
     const toRemove = keys.length - maxSize;
     for (let i = 0; i < toRemove; i++) delete cache[keys[i]];
@@ -270,8 +270,8 @@ async function getCachedVerdict(artist) {
     const cache = data.aiVerdictCache || {};
     const entry = cache[artist.toLowerCase()];
     if (!entry) return null;
-    if (Date.now() - entry.checkedAt > CACHE_MAX_AGE_MS) return null; // протухло, переспрашиваем
-    if (entry.v !== 2) return null; // запись из старой версии (null тогда сохранялся как «human») — переспрашиваем
+    if (Date.now() - entry.checkedAt > CACHE_MAX_AGE_MS) return null; // expired, ask again
+    if (entry.v !== 2) return null; // entry from an old version (null used to be stored as "human") — ask again
 }
 
 async function saveCachedVerdict(artist, isAI, reason, checkedAt = Date.now()) {
@@ -284,7 +284,7 @@ async function saveCachedVerdict(artist, isAI, reason, checkedAt = Date.now()) {
     await trimVerdictCache(maxSize);
 }
 
-// --- ARTIST LINKS CACHE (MusicBrainz, 30 дней, независимо от вердикта) ---
+// --- ARTIST LINKS CACHE (MusicBrainz, 30 days, independent of the verdict) ---
 
 const LINKS_CACHE_LIMIT = 500;
 
@@ -292,7 +292,7 @@ async function getCachedLinks(artist) {
     const data = await chrome.storage.local.get(['artistLinksCache']);
     const entry = (data.artistLinksCache || {})[artist.toLowerCase()];
     if (!entry || Date.now() - entry.checkedAt > CACHE_MAX_AGE_MS) return null;
-    if (entry.v !== 2) return null; // запись до появления Wikidata — перезапрашиваем
+    if (entry.v !== 2) return null; // entry predates Wikidata — re-request
     return entry;
 }
 
@@ -318,14 +318,14 @@ function render() {
     list.style.display = '';
     sourcesPanel.style.display = 'none';
     inputArea.style.display = 'none';
-    subtypeGroup.style.display = 'none'; // радиокнопки Keywords/Songs/Artists показываем только на My List
-    modeGroup.style.display = 'none';    // переключатель Blocklist/Whitelist — тоже только на My List
-    actionsRow.style.display = 'flex'; // по умолчанию видим, скрываем только на Settings
+    subtypeGroup.style.display = 'none'; // Keywords/Songs/Artists radio buttons only shown on My List
+    modeGroup.style.display = 'none';    // Blocklist/Whitelist switch — also only on My List
+    actionsRow.style.display = 'flex'; // visible by default, hidden only on Settings
 
     if (currentTab === 'settings') {
         settingsPanel.style.display = 'block';
         list.style.display = 'none';
-        actionsRow.style.display = 'none'; // MOD: на Settings кнопки не нужны
+        actionsRow.style.display = 'none'; // MOD: no buttons needed on Settings
         loadSettingsUI();
         return;
     }
@@ -394,7 +394,7 @@ function formatDuration(ms) {
 
 function renderStats(stats) {
     stats = stats || {};
-    const todayKey = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, локальная дата
+    const todayKey = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, local date
     const dailyBlocked = stats.dailyBlocked || {};
 
     statTodayEl.textContent = dailyBlocked[todayKey] || 0;
@@ -404,9 +404,9 @@ function renderStats(stats) {
         : 'No AI tracks blocked yet';
 }
 
-// Добавляет исполнителя в пользовательский блок-лист (Artists). Текущий
-// трек НЕ скипается немедленно — по требованию вердикт Groq не должен
-// влиять на поведение, только дать пользователю быстрый способ забанить.
+// Adds the artist to the user blocklist (Artists). The current
+// track is NOT skipped immediately — by design the Groq verdict must not
+// affect behaviour, it only gives the user a quick way to ban.
 function banArtistFromInfo(artist, btn) {
     chrome.storage.local.get(['blockedArtists'], (res) => {
         const items = res.blockedArtists || [];
@@ -419,15 +419,15 @@ function banArtistFromInfo(artist, btn) {
 
         items.push(artist);
         chrome.storage.local.set({ blockedArtists: items }, async () => {
-            await removeFromLists(WL_KEYS, artist); // бан и Whitelist взаимоисключающие
+            await removeFromLists(WL_KEYS, artist); // ban and Whitelist are mutually exclusive
             showStatus(`"${artist}" added to blocklist.`, '#4caf50');
             if (btn) { btn.disabled = true; btn.textContent = '✓ Banned'; }
         });
     });
 }
 
-// forceRefresh = true — игнорируем кэш и заново спрашиваем Groq (кнопка Refresh / Retry);
-// новый ответ перезапишет запись в кэше вместе с новой меткой времени.
+// forceRefresh = true — ignore the cache and ask Groq again (Refresh / Retry button);
+// the new answer overwrites the cache entry together with a new timestamp.
 function renderInfoTab(forceRefresh = false) {
     chrome.storage.local.get(['nowPlaying', 'stats', 'groqApiKey'], async (res) => {
         const now = res.nowPlaying;
@@ -453,8 +453,8 @@ function renderInfoTab(forceRefresh = false) {
         const requestedArtist = now.artist;
         const requestedTitle = now.title;
 
-        // Кэш — только по артисту (не по треку), на 30 дней. Если есть
-        // свежая запись — сети вообще не касаемся.
+        // Cache is keyed by artist only (not by track) and lasts 30 days. If there is a
+        // fresh entry — we don't touch the network at all.
         const cached = forceRefresh ? null : await getCachedVerdict(requestedArtist);
         if (cached) {
             renderVerdict(requestedArtist, requestedTitle, cached.isAI, cached.reason, true, cached.checkedAt, forceRefresh);
@@ -471,8 +471,8 @@ function renderInfoTab(forceRefresh = false) {
 
         chrome.runtime.sendMessage({ type: 'FETCH_GROQ_VERDICT', apiKey, artist: requestedArtist, title: requestedTitle })
             .then(result => {
-                // Пока ждали ответ Groq, трек мог уже смениться — сверяем
-                // перед выводом, иначе покажем вердикт не для того трека.
+                // While we waited for the Groq answer the track may have changed — verify
+                // before rendering, otherwise we'd show a verdict for a different track.
                 chrome.storage.local.get(['nowPlaying'], (res2) => {
                     const np = res2.nowPlaying;
                     if (!np || np.artist !== requestedArtist || np.title !== requestedTitle) return;
@@ -484,7 +484,7 @@ function renderInfoTab(forceRefresh = false) {
 
                     const { isAI, reason } = result.data;
                     const checkedAt = Date.now();
-                    saveCachedVerdict(requestedArtist, isAI, reason, checkedAt); // не ждём — запись в фоне
+                    saveCachedVerdict(requestedArtist, isAI, reason, checkedAt); // don't wait — write in background
                     renderVerdict(requestedArtist, requestedTitle, isAI, reason, false, checkedAt, forceRefresh);
                 });
             })
@@ -502,7 +502,7 @@ function formatCheckedAt(ts) {
     });
 }
 
-// Иконки соцсетей (простые inline-SVG, без внешних файлов).
+// Social icons (plain inline SVG, no external files).
 const SOCIAL_ICONS = {
     website:    { title: 'Website',     svg: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>' },
     instagram:  { title: 'Instagram',   svg: '<rect x="3.5" y="3.5" width="17" height="17" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17" cy="7" r="0.8" fill="currentColor"/>' },
@@ -515,8 +515,8 @@ const SOCIAL_ICONS = {
     bandcamp:   { title: 'Bandcamp',    svg: '<path d="M3 17.5L8.5 6.5H21L15.5 17.5z"/>' }
 };
 
-// Платформы, для которых при отсутствии проверенной ссылки показываем
-// иконку-поиск (ведёт на страницу результатов, а не на «угаданный» профиль).
+// Platforms where, lacking a verified link, we show a
+// search icon (leads to a results page, not to a "guessed" profile).
 const SEARCH_FALLBACKS = {
     instagram: (q) => 'https://www.google.com/search?q=' + encodeURIComponent(q + ' instagram'),
     youtube:   (q) => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q),
@@ -526,7 +526,7 @@ const SEARCH_FALLBACKS = {
     facebook:  (q) => 'https://www.google.com/search?q=' + encodeURIComponent(q + ' facebook')
 };
 
-// Фирменные цвета — для запасной (inline-SVG) иконки, если favicon не загрузился.
+// Brand colours — for the fallback (inline SVG) icon when the favicon fails to load.
 const SOCIAL_COLORS = {
     website: '#4caf50', instagram: '#e4405f', youtube: '#ff0000', spotify: '#1db954',
     twitter: '#ffffff', facebook: '#1877f2', tiktok: '#25f4ee', soundcloud: '#ff5500', bandcamp: '#629aa9'
@@ -536,17 +536,17 @@ function svgIconHtml(meta, color) {
     return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="${color || 'currentColor'}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${meta.svg}</svg>`;
 }
 
-// Проверенная ссылка → цветной favicon сайта (через сервис favicon Google;
-// наружу уходит только домен, не весь URL). Если картинка не загрузилась
-// (нет сети / блокировка) — подменяем цветной inline-SVG.
-// Ссылка-поиск → серая пунктирная иконка без favicon.
+// Verified link → colourful site favicon (via Google's favicon service;
+// only the domain goes out, not the whole URL). If the image fails to load
+// (no network / blocked) — we swap in a colourful inline SVG.
+// Search link → grey dashed icon without a favicon.
 function makeSocialAnchor(key, meta, href, isSearch) {
     const a = document.createElement('a');
     a.className = 'groq-social-link' + (isSearch ? ' search' : '');
     a.href = href;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
-    a.title = isSearch ? `Search: ${meta.title}` : href; // при наведении — полная ссылка
+    a.title = isSearch ? `Search: ${meta.title}` : href; // full link on hover
 
     if (isSearch) {
         a.innerHTML = svgIconHtml(meta);
@@ -554,7 +554,7 @@ function makeSocialAnchor(key, meta, href, isSearch) {
     }
 
     let host = '';
-    try { host = new URL(href).hostname; } catch (e) { /* оставим SVG */ }
+    try { host = new URL(href).hostname; } catch (e) { /* keep the SVG */ }
 
     const colorSvg = () => { a.innerHTML = svgIconHtml(meta, SOCIAL_COLORS[key]); };
 
@@ -570,8 +570,8 @@ function makeSocialAnchor(key, meta, href, isSearch) {
     return a;
 }
 
-// verified — ссылки из MusicBrainz (сплошные иконки); для платформ без
-// такой ссылки добавляем пунктирные иконки-поиск.
+// verified — links from MusicBrainz (solid icons); for platforms without
+// such a link we add dashed search icons.
 function buildSocialLinks(artist, verified) {
     const row = document.createElement('div');
     row.className = 'groq-social-row';
@@ -591,7 +591,7 @@ function buildSocialLinks(artist, verified) {
 
 let socialRequestId = 0;
 
-// Прячет карточку соцсетей и отменяет ещё не завершённые запросы ссылок.
+// Hides the social card and cancels link requests that are still in flight.
 function clearSocialBox() {
     socialRequestId++;
     socialBox.style.display = 'none';
@@ -602,7 +602,7 @@ async function loadSocialLinks(artist, title, force) {
     const myId = ++socialRequestId;
     const stillRelevant = () => myId === socialRequestId && groqBox.querySelector('.groq-meta-row');
 
-    // note — короткая подпись под иконками: чем закончился поиск ссылок.
+    // note — short caption under the icons: how the link lookup ended.
     const attach = (links, note) => {
         if (!stillRelevant()) return;
         socialBox.innerHTML = '';
@@ -628,7 +628,7 @@ async function loadSocialLinks(artist, title, force) {
     chrome.runtime.sendMessage({ type: 'FETCH_ARTIST_LINKS', artist, title })
         .then(result => {
             if (!result || !result.ok) {
-                // сбой сети/сервиса — не кэшируем, чтобы повторить при следующем открытии
+                // network/service failure — don't cache, so it retries on the next open
                 attach({}, 'Links lookup failed: ' + ((result && result.error) || 'no response'));
                 return;
             }
@@ -657,7 +657,7 @@ function renderVerdict(artist, title, isAI, reason, fromCache, checkedAt, forceL
     `;
 
     groqBox.querySelector('.groq-refresh-btn').onclick = () => renderInfoTab(true);
-    // Карточка соцсетей живёт отдельно от вердикта: сбрасываем старую, пока грузится новая
+    // The social card lives separately from the verdict: reset the old one while the new one loads
     socialBox.style.display = 'none';
     socialBox.innerHTML = '';
 
@@ -669,13 +669,13 @@ function renderVerdict(artist, title, isAI, reason, fromCache, checkedAt, forceL
         groqBox.appendChild(banBtn);
     }
 
-    loadSocialLinks(artist, title, forceLinks); // иконки подгружаются отдельно и не задерживают вердикт
+    loadSocialLinks(artist, title, forceLinks); // icons load separately and don't hold up the verdict
 }
 
-// Короткое человекочитаемое сообщение + кнопка Retry. background.js уже
-// вытаскивает message из тела ошибки API (включая отдельные сообщения
-// про превышение лимита запросов в минуту/день), так что сюда приходит
-// уже готовый для показа текст, не сырой JSON.
+// Short human-readable message + Retry button. background.js already
+// pulls the message out of the API error body (including the separate messages
+// about hitting the per-minute/per-day request limit), so what arrives here is
+// display-ready text, not raw JSON.
 function renderGroqError(message) {
     clearSocialBox();
     groqBox.innerHTML = `
@@ -691,7 +691,7 @@ function renderGroqError(message) {
 
 // --- LOGIC ---
 
-// --- AI DB: карточки источников ---
+// --- AI DB: source cards ---
 
 const SOURCES = [
     {
@@ -708,7 +708,7 @@ const SOURCES = [
     }
 ];
 
-// Время жизни кэша SoundProof (настраивается в карточке на AI DB). 0 = кэш выключен.
+// SoundProof cache lifetime (configurable in the AI DB card). 0 = cache off.
 const SP_TTL_OPTIONS = [
     { label: 'Off', ms: 0 },
     { label: '1H',  ms: 60 * 60 * 1000 },
@@ -741,7 +741,7 @@ function setStat(el, html, isError) {
     el.innerHTML = html;
 }
 
-// ZoundHub: количество записей в базе
+// ZoundHub: number of records in the database
 function loadZoundhubStat(statEl) {
     setStat(statEl, 'Loading…');
     return chrome.runtime.sendMessage({ type: 'FETCH_AI_ARTISTS' })
@@ -766,8 +766,8 @@ function loadZoundhubStat(statEl) {
         .catch(e => setStat(statEl, 'Connection failed: ' + escapeHtml(e.message), true));
 }
 
-// SoundProof: записей «всей базы» нет (запрос идёт по одному артисту),
-// поэтому показываем число закэшированных проверок.
+// SoundProof: there is no "whole database" record count (the query goes artist by artist),
+// so we show the number of cached lookups.
 async function loadSoundproofStat(statEl, extraNote) {
     const data = await chrome.storage.local.get(['soundproofCache']);
     const n = Object.keys(data.soundproofCache || {}).length;
@@ -840,14 +840,14 @@ async function renderSourcesPanel() {
             select.onchange = async () => {
                 const ms = Number(select.value);
                 await chrome.storage.local.set({ soundproofCacheTtl: ms });
-                if (ms === 0) await chrome.storage.local.remove('soundproofCache'); // «Off» — старые ответы не держим
+                if (ms === 0) await chrome.storage.local.remove('soundproofCache'); // "Off" — we don't keep old answers
                 const label = SP_TTL_OPTIONS.find(o => o.ms === ms).label;
                 showStatus(`SoundProof cache: ${label}`, '#4caf50');
                 loadSoundproofStat(statEl);
             };
             card.querySelector('.source-main').appendChild(row);
 
-            // Правила автоскипа по голосам (по умолчанию 50% и 3 голоса)
+            // Auto-skip rules based on votes (default 50% and 3 votes)
             const rules = document.createElement('div');
             rules.className = 'source-ttl-row source-rules-row';
             rules.title = 'Skip when AI lead ≥ the percentage and the artist has at least this many votes. Lead = (AI votes − Human votes) / all votes, so a 50% lead equals 75% AI votes. Verified artists always count as decisive.';
@@ -882,7 +882,7 @@ async function renderSourcesPanel() {
 
 async function getSoundproof(artist, force) {
     const key = artist.toLowerCase().trim();
-    const ttlMs = await getSoundproofTtl(); // срок берём из текущей настройки — смена применяется и к уже сохранённым ответам
+    const ttlMs = await getSoundproofTtl(); // TTL comes from the current setting — a change also applies to already saved answers
 
     if (!force && ttlMs > 0) {
         const stored = await chrome.storage.local.get(['soundproofCache']);
@@ -900,19 +900,19 @@ async function getSoundproof(artist, force) {
 
     let data = await ask(artist);
 
-    // «A, B» — у SoundProof ключом служит первый исполнитель из плеера.
+    // "A, B" — for SoundProof the key is the first artist from the player.
     if (data.human + data.ai === 0 && artist.includes(',')) {
         const first = artist.split(/\s*,\s*/)[0];
         if (first && first.toLowerCase() !== key) {
             try {
                 const d2 = await ask(first);
                 if (d2.human + d2.ai > 0) data = d2;
-            } catch (e) { /* оставляем исходный ответ */ }
+            } catch (e) { /* keep the original answer */ }
         }
     }
 
     const checkedAt = Date.now();
-    if (ttlMs === 0) return { data, cached: false, checkedAt }; // кэш выключен — ничего не сохраняем
+    if (ttlMs === 0) return { data, cached: false, checkedAt }; // cache off — store nothing
 
     const stored = await chrome.storage.local.get(['soundproofCache']);
     const cache = stored.soundproofCache || {};
@@ -941,7 +941,7 @@ async function renderSoundproofCard(artist, force) {
         return;
     }
 
-    // Info перерисовывается и при смене статистики — не мигаем, если артист тот же.
+    // Info re-renders on stats changes too — don't flicker if the artist is the same.
     if (!force && spRenderedArtist === artist && soundproofBox.innerHTML) return;
 
     const myId = ++spRequestId;
@@ -980,7 +980,7 @@ function drawSoundproof(artist, data, cached, checkedAt) {
     } else if (total > 0) {
         isAI = ai > human;
         pct = Math.round((Math.max(ai, human) / total) * 100);
-        const lean = pct < 75 || total <= 5; // те же пороги, что описаны в README SoundProof
+        const lean = pct < 75 || total <= 5; // same thresholds as described in the SoundProof README
         badgeClass = lean ? (isAI ? 'lean-ai' : 'lean-human') : (isAI ? 'is-ai' : 'not-ai');
         badgeText = (lean ? 'LEAN ' : '') + (isAI ? 'AI' : 'HUMAN');
     }
@@ -1011,8 +1011,8 @@ function drawSoundproof(artist, data, cached, checkedAt) {
     });
 }
 
-// Голосование (только по клику). После голоса принудительно перечитываем статус,
-// чтобы показать актуальные числа и выбранную кнопку.
+// Voting (click only). After a vote we force a re-read of the status,
+// so the current numbers and the selected button are shown.
 function setVoteNote(text, isError) {
     let note = soundproofBox.querySelector('.sp-vote-note');
     if (!note) {
@@ -1062,8 +1062,8 @@ function addItem() {
         if (!exists) {
             items.push(newItem);
             chrome.storage.local.set({ [key]: items }, async () => {
-                // Whitelist ↔ Blocklist: запись не может быть в обоих списках сразу,
-                // поэтому такая же запись удаляется из противоположного списка.
+                // Whitelist ↔ Blocklist: an entry cannot be in both lists at once,
+                // so the same entry is removed from the opposite list.
                 const removed = await removeFromLists(mode === 'white' ? BL_KEYS : WL_KEYS, termText(newItem));
                 input.value = '';
                 render();
@@ -1158,15 +1158,15 @@ fileInput.onchange = (e) => {
     reader.readAsText(file);
 };
 
-// NEW: content.js пишет nowPlaying/stats в storage на каждую смену трека —
-// без этого слушателя Info-вкладка обновлялась только при переоткрытии
-// попапа, а не "живьём", пока он уже открыт.
+// NEW: content.js writes nowPlaying/stats to storage on every track change —
+// without this listener the Info tab only refreshed when the popup was
+// reopened, not "live" while it is already open.
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     if (currentTab === 'info' && (changes.nowPlaying || changes.stats)) {
         renderInfoTab();
     }
-    // Список изменили снаружи (например, кликом по AI-бейджу на странице) — обновляем открытый My List
+    // The list was changed from outside (e.g. by clicking the AI badge on the page) — refresh the open My List
     if (currentTab === 'mylist' && [...BL_KEYS, ...WL_KEYS].some(k => changes[k])) {
         render();
     }

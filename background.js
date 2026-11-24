@@ -8,28 +8,28 @@ async function fetchArtists() {
     return await response.json();
 }
 
-// Groq — используется вкладкой Info в попапе для проверки текущего
-// исполнителя. Ключ приходит от пользователя (хранится в
-// chrome.storage.local, вводится в Settings), сюда передаётся прямо в
-// сообщении — background.js сам ключ не хранит.
-// Результат кэшируется в popup.js (по артисту, на 30 дней) — сюда
-// background.js попадает только при промахе кэша.
-// llama-3.1-8b-instant отключена Groq 16.08.2026 — используем их официальную
-// замену (openai/gpt-oss-20b): сопоставимая по скорости/размеру production-модель.
+// Groq — used by the Info tab in the popup to check the current
+// artist. The key comes from the user (stored in
+// chrome.storage.local, entered in Settings) and is passed in here right in
+// the message — background.js does not store the key itself.
+// The result is cached in popup.js (per artist, for 30 days) — so
+// background.js is only reached on a cache miss.
+// llama-3.1-8b-instant was retired by Groq on 2026-08-16 — we use their official
+// replacement (openai/gpt-oss-20b): a production model of comparable speed/size.
 const GROQ_MODEL = 'openai/gpt-oss-20b';
 
-// 503/429/529 — временные ошибки (перегрузка/рейт-лимит самого провайдера),
-// имеет смысл повторить запрос с небольшой паузой. Остальные коды
-// (400/401/403 и т.п.) повторять бессмысленно — там проблема в самом
-// запросе/ключе.
+// 503/429/529 — transient errors (provider overload/rate limit),
+// worth retrying after a short pause. Other codes
+// (400/401/403 etc.) are pointless to retry — the problem is in the
+// request/key itself.
 const RETRYABLE_STATUSES = new Set([503, 429, 529]);
 const MAX_ATTEMPTS = 3;
-const RETRY_DELAY_MS = [600, 1500]; // паузы перед 2-й и 3-й попыткой
+const RETRY_DELAY_MS = [600, 1500]; // pauses before the 2nd and 3rd attempt
 
-// NEW: собственные лимиты запросов (независимо от лимитов самого Groq) —
-// 15 в минуту и 500 в день. Состояние живёт в chrome.storage.local, а не
-// в памяти service worker'а — иначе оно бы слетало при каждой выгрузке
-// воркера (MV3 выгружает неактивные воркеры очень часто).
+// NEW: our own request limits (independent of Groq's own limits) —
+// 15 per minute and 500 per day. The state lives in chrome.storage.local, not
+// in the service worker's memory — otherwise it would reset on every worker
+// unload (MV3 unloads idle workers very often).
 const RPM_LIMIT = 15;
 const RPD_LIMIT = 500;
 
@@ -37,26 +37,26 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Вытаскивает человекочитаемое message из тела ошибки API
-// (OpenAI-совместимый формат: {"error": {"message": "...", ...}}),
-// чтобы в попапе не показывать сырой JSON.
+// Pulls a human-readable message out of the API error body
+// (OpenAI-compatible format: {"error": {"message": "...", ...}}),
+// so the popup doesn't show raw JSON.
 function extractErrorMessage(status, bodyText) {
     try {
         const parsed = JSON.parse(bodyText);
         if (parsed && parsed.error && parsed.error.message) {
             return parsed.error.message;
         }
-    } catch (e) { /* тело не JSON — используем как есть */ }
+    } catch (e) { /* body is not JSON — use it as is */ }
     return bodyText ? bodyText.slice(0, 200) : `HTTP ${status}`;
 }
 
-// Проверяет и тут же расходует один запрос из лимита RPM/RPD.
-// Кидает ошибку с err.rateLimited = 'minute' | 'day', если лимит исчерпан.
+// Checks and immediately spends one request from the RPM/RPD quota.
+// Throws an error with err.rateLimited = 'minute' | 'day' when the limit is exhausted.
 async function checkAndConsumeRateLimit() {
     const data = await chrome.storage.local.get(['groqRateLimit']);
     const now = Date.now();
     const minuteKey = Math.floor(now / 60000);
-    const dayKey = new Date(now).toLocaleDateString('en-CA'); // локальная дата YYYY-MM-DD
+    const dayKey = new Date(now).toLocaleDateString('en-CA'); // local date YYYY-MM-DD
 
     let rl = data.groqRateLimit || {};
     if (rl.minuteKey !== minuteKey) { rl.minuteKey = minuteKey; rl.minuteCount = 0; }
@@ -90,7 +90,7 @@ async function callGroqOnce(apiKey, prompt) {
             body: JSON.stringify({
                 model: GROQ_MODEL,
                 messages: [{ role: 'user', content: prompt }],
-                response_format: { type: 'json_object' } // Groq вернёт строго JSON, без ```-обёртки
+                response_format: { type: 'json_object' } // Groq returns strict JSON, without ```-wrapping
             })
         }
     );
@@ -105,15 +105,15 @@ async function callGroqOnce(apiKey, prompt) {
     return response.json();
 }
 
-// --- Ссылки на соцсети: MusicBrainz ---
-// Groq выдумывал URL (несуществующие сайты и профили), поэтому ссылки
-// берём из MusicBrainz — там их вносят и проверяют люди. Если артиста
-// нет в базе (типично для AI-исполнителей), ссылок просто не будет.
+// --- Social links: MusicBrainz ---
+// Groq made up URLs (nonexistent sites and profiles), so we take links
+// from MusicBrainz — where people add and verify them. If the artist
+// isn't in the database (typical for AI performers), there simply will be no links.
 const MB_BASE = 'https://musicbrainz.org/ws/2';
-const MB_MIN_INTERVAL_MS = 1100; // правило MusicBrainz: не чаще 1 запроса в секунду
+const MB_MIN_INTERVAL_MS = 1100; // MusicBrainz rule: no more than 1 request per second
 let mbNextSlot = 0;
 
-// Хост → платформа (по домену ссылки из MusicBrainz).
+// Host → platform (by the domain of the link from MusicBrainz).
 const PLATFORM_HOSTS = {
     instagram:  ['instagram.com'],
     youtube:    ['youtube.com', 'youtu.be'],
@@ -145,7 +145,7 @@ async function mbFetch(path) {
     let response;
     for (let attempt = 1; attempt <= 2; attempt++) {
         response = await fetch(MB_BASE + path, { headers: { 'Accept': 'application/json' } });
-        // 503/429 у MusicBrainz — временная перегрузка/лимит, один повтор
+        // 503/429 from MusicBrainz — transient overload/limit, retry once
         if ((response.status === 503 || response.status === 429) && attempt === 1) {
             await sleep(2000);
             continue;
@@ -163,9 +163,9 @@ async function mbFetch(path) {
 const luceneEscape = (str) => String(str).replace(/(["\\])/g, '\\$1');
 const normName = (str) => String(str || '').normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
 
-// Ищем MBID исполнителя. Сначала по паре «трек + артист» (это снимает
-// неоднозначность одноимённых групп), затем по одному имени — но только
-// если среди точных совпадений ровно один кандидат.
+// Find the artist's MBID. First by the "track + artist" pair (this removes
+// ambiguity between groups with the same name), then by name alone — but only
+// if there is exactly one candidate among the exact matches.
 async function findArtistMbid(artist, title) {
     const wanted = new Set([normName(artist)]);
     artist.split(/\s*(?:,|&|\bfeat\.?|\bx\b)\s*/i).forEach(p => p && wanted.add(normName(p)));
@@ -189,12 +189,12 @@ async function findArtistMbid(artist, title) {
     return exact.length === 1 ? exact[0].id : null;
 }
 
-// --- Ссылки на соцсети: Wikidata (второй источник) ---
-// Артист определяется через MusicBrainz (ссылка на Wikidata в его карточке
-// или поиск по MBID, свойство P434), поэтому путаницы с однофамильцами нет.
-// ID свойств Wikidata ниже проверяются на лету: при первом запуске
-// запрашиваем их названия и шаблоны URL (P1630) и используем свойство, только
-// если английское название совпало с ожидаемым. Неверный ID будет пропущен.
+// --- Social links: Wikidata (second source) ---
+// The artist is identified through MusicBrainz (a Wikidata link in its record
+// or a search by MBID, property P434), so there is no confusion with namesakes.
+// The Wikidata property IDs below are verified on the fly: on the first run we
+// request their labels and URL templates (P1630) and use a property only
+// if its English label matches the expected one. A wrong ID is skipped.
 const WD_API = 'https://www.wikidata.org/w/api.php';
 
 const WD_PROPS = {
@@ -218,7 +218,7 @@ async function wdFetch(params) {
     return response.json();
 }
 
-// Возвращает { key: { id, formatter } } только для проверенных свойств.
+// Returns { key: { id, formatter } } for verified properties only.
 async function loadWdPropFormats() {
     const stored = await chrome.storage.local.get(['wdPropFormats']);
     const cached = stored.wdPropFormats;
@@ -247,7 +247,7 @@ async function loadWdPropFormats() {
 async function findQidByMbid(mbid) {
     const res = await wdFetch({ action: 'query', list: 'search', srsearch: `haswbstatement:P434=${mbid}`, srlimit: '2' });
     const hits = (res.query && res.query.search) || [];
-    return hits.length === 1 && /^Q\d+$/.test(hits[0].title) ? hits[0].title : null; // неоднозначно — не берём
+    return hits.length === 1 && /^Q\d+$/.test(hits[0].title) ? hits[0].title : null; // ambiguous — don't take it
 }
 
 function wdStatementValues(claims, propId) {
@@ -255,7 +255,7 @@ function wdStatementValues(claims, propId) {
     const usable = list.filter(st =>
         st.rank !== 'deprecated' &&
         st.mainsnak && st.mainsnak.datavalue &&
-        !(st.qualifiers && st.qualifiers.P582) // P582 — «дата окончания»: аккаунт уже не актуален
+        !(st.qualifiers && st.qualifiers.P582) // P582 — "end date": the account is no longer current
     );
     usable.sort((a, b) => (b.rank === 'preferred') - (a.rank === 'preferred'));
     return usable.map(st => st.mainsnak.datavalue.value).filter(v => typeof v === 'string');
@@ -282,7 +282,7 @@ async function fetchWikidataLinks(qid) {
         }
 
         if (!/^https?:\/\//i.test(url)) continue;
-        if (key !== 'website' && platformOfUrl(url) !== key) continue; // ссылка должна вести на «свою» платформу
+        if (key !== 'website' && platformOfUrl(url) !== key) continue; // the link must point to its "own" platform
         links[key] = url.replace(/^http:\/\//i, 'https://');
     }
     return links;
@@ -312,7 +312,7 @@ async function fetchArtistLinks(artist, title) {
     }
     console.log('[YTM Ward] MusicBrainz relations:', (data.relations || []).length, '→ links:', links);
 
-    // Второй источник: Wikidata дополняет только те платформы, которых нет в MusicBrainz.
+    // Second source: Wikidata only fills in platforms that MusicBrainz lacks.
     try {
         if (!qid) qid = await findQidByMbid(mbid);
         if (qid) {
@@ -332,9 +332,9 @@ async function fetchArtistLinks(artist, title) {
 async function fetchGroqVerdict(apiKey, artist, title) {
     if (!apiKey) throw new Error('No Groq API key set');
 
-    // Лимиты расходуем ОДИН раз на логическую проверку трека, а не на
-    // каждую повторную попытку внутри неё — иначе один ретрай «съедал» бы
-    // сразу несколько запросов из квоты.
+    // We spend the quota ONCE per logical track check, not on
+    // every retry inside it — otherwise a single retry would "eat"
+    // several requests from the quota at once.
     await checkAndConsumeRateLimit();
 
     const prompt = `Determine if "${artist} - ${title}" is performed by an AI singer (or uses an AI-generated voice). 
@@ -363,7 +363,7 @@ Rules for JSON fields:
             lastErr = err;
             const isLastAttempt = attempt === MAX_ATTEMPTS;
             if (!RETRYABLE_STATUSES.has(err.status) || isLastAttempt) {
-                throw err; // не временная ошибка, или попытки кончились
+                throw err; // not a transient error, or attempts exhausted
             }
             console.warn(`[YTM Ward] Groq ${err.status} — повтор ${attempt}/${MAX_ATTEMPTS - 1}...`);
             await sleep(RETRY_DELAY_MS[attempt - 1]);
@@ -373,7 +373,7 @@ Rules for JSON fields:
 
     const rawText = data?.choices?.[0]?.message?.content || '';
     const cleaned = rawText.replace(/```json|```/g, '').trim();
-    // Отладка: DevTools → chrome://extensions → «service worker» → Console
+    // Debug: DevTools → chrome://extensions → "service worker" → Console
     console.log('[YTM Ward] Groq raw answer for', artist, '-', title, ':', cleaned);
 
     let parsed;
@@ -383,7 +383,7 @@ Rules for JSON fields:
         throw new Error('Groq вернул не-JSON ответ');
     }
 
-    // true / false / null — null («не уверен») больше не превращается в false.
+    // true / false / null — null ("not sure") is no longer turned into false.
     const isAI = parsed.isAI === true ? true : (parsed.isAI === false ? false : null);
 
     return {
@@ -392,15 +392,15 @@ Rules for JSON fields:
     };
 }
 
-// --- SoundProof (источник: голоса сообщества) ---
-// Только чтение: get_artist_status возвращает число голосов «AI» и «Human»
-// по исполнителю и флаг verified. Голосование из этого расширения не
-// выполняется. Ключ — публичный (publishable) ключ клиента SoundProof;
-// данные принадлежат сервису SoundProof.
+// --- SoundProof (source: community votes) ---
+// Read-only: get_artist_status returns the number of "AI" and "Human" votes
+// for an artist and a verified flag. Voting from this extension is not
+// performed. The key is SoundProof's public (publishable) client key;
+// the data belongs to the SoundProof service.
 const SOUNDPROOF_RPC = 'https://solsneywdlhvwbtghopw.supabase.co/rest/v1/rpc/';
 const SOUNDPROOF_URL = SOUNDPROOF_RPC + 'get_artist_status';
 const SOUNDPROOF_KEY = 'sb_publishable_dlFufI-1QXA4VJdGoMWxMw_ouWHyl3k';
-const SOUNDPROOF_PLATFORM = 'music'; // так SoundProof называет YouTube Music
+const SOUNDPROOF_PLATFORM = 'music'; // this is what SoundProof calls YouTube Music
 
 async function fetchSoundproofStatus(artist) {
     const response = await fetch(SOUNDPROOF_URL, {
@@ -423,9 +423,9 @@ async function fetchSoundproofStatus(artist) {
     };
 }
 
-// Голос пользователя. Вызывается только по клику на кнопку Human / AI в карточке
-// SoundProof (Info). Параметры — как в оригинальном клиенте SoundProof; кто именно
-// голосует, определяет сервер, никаких учётных данных мы не отправляем.
+// The user's vote. Called only on a click of the Human / AI button in the
+// SoundProof card (Info). Parameters are as in the original SoundProof client; who
+// is actually voting is decided by the server, we send no credentials.
 async function castSoundproofVote(artist, type) {
     if (type !== 'human' && type !== 'ai') throw new Error('Invalid vote type');
     const response = await fetch(SOUNDPROOF_RPC + 'handle_vote', {
@@ -440,8 +440,8 @@ async function castSoundproofVote(artist, type) {
     }
 }
 
-// Статус SoundProof с кэшем (тот же кэш и тот же срок жизни, что на вкладке Info,
-// поэтому проверка при старте трека и карточка Info не делают лишних запросов).
+// SoundProof status with cache (the same cache and the same lifetime as on the Info tab,
+// so the check at track start and the Info card don't make redundant requests).
 const SP_CACHE_DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 1D
 
 async function getSoundproofCached(artist) {
@@ -457,14 +457,14 @@ async function getSoundproofCached(artist) {
 
     let data = await fetchSoundproofStatus(artist);
 
-    // «A, B» — ключом у SoundProof служит первый исполнитель
+    // "A, B" — for SoundProof the key is the first artist
     if (data.human + data.ai === 0 && String(artist).includes(',')) {
         const first = String(artist).split(/\s*,\s*/)[0];
         if (first && first.toLowerCase() !== key) {
             try {
                 const d2 = await fetchSoundproofStatus(first);
                 if (d2.human + d2.ai > 0) data = d2;
-            } catch (e) { /* оставляем исходный ответ */ }
+            } catch (e) { /* keep the original answer */ }
         }
     }
 

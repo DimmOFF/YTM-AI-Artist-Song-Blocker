@@ -15,13 +15,13 @@
     .tab-btn:hover { background: #444; color: #fff; }
     .tab-btn.active { background: #ff4444; color: white; font-weight: bold; }
 
-    /* My List: переключатель Blocklist / Whitelist */
+    /* My List: Blocklist / Whitelist switch */
     .mode-group { display: flex; gap: 3px; margin-bottom: 10px; padding: 3px; background: #2a2a2a; border-radius: 6px; }
     .mode-btn { flex: 1; padding: 7px 0; background: transparent; border: none; color: #aaa; font-size: 12px; cursor: pointer; border-radius: 4px; transition: 0.2s; }
     .mode-btn:hover { color: #fff; }
     .mode-btn.active[data-mode="block"] { background: #ff4444; color: #fff; font-weight: bold; }
     .mode-btn.active[data-mode="white"] { background: #fff; color: #111; font-weight: bold; }
-    /* В режиме Whitelist акценты белые (как белый AI-бейдж) */
+    /* In Whitelist mode accents are white (like the white AI badge) */
     body.mode-white .subtype-option.active { color: #fff; }
     body.mode-white .subtype-option input[type="radio"] { accent-color: #fff; }
     body.mode-white input[type="text"]:focus { border-color: #fff; }
@@ -49,13 +49,13 @@
     .delete-btn { color: #666; cursor: pointer; font-weight: bold; padding: 2px 6px; border-radius: 4px; }
     .delete-btn:hover { color: #ff4444; background: rgba(255,68,68,0.1); }
 
-    /* Settings panel — без фиксированной высоты и скролла */
+    /* Settings panel — no fixed height or scrollbar */
     #settings-panel { padding: 5px 0 15px 0; }
     .settings-hint { font-size: 11px; color: #888; margin-bottom: 15px; line-height: 1.4; }
     .settings-checkbox { display: flex; align-items: center; gap: 10px; padding: 10px 8px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: 0.2s; }
     .settings-checkbox:hover { background: #2a2a2a; }
     .settings-checkbox input[type="checkbox"] { width: 16px; height: 16px; accent-color: #ff4444; cursor: pointer; }
-    /* Состояние "проигнорировано", когда включена Dislike AI and Skip */
+    /* "Ignored" state when Dislike AI and Skip is enabled */
     .settings-checkbox.disabled { opacity: 0.4; cursor: not-allowed; }
     .settings-checkbox.disabled:hover { background: none; }
     .settings-checkbox.disabled input[type="checkbox"] { cursor: not-allowed; }
@@ -74,7 +74,7 @@
     .switch input:checked + .slider { background-color: #4caf50; }
     .switch input:checked + .slider:before { transform: translateX(16px); }
 
-    /* Actions Footer (скрывается на вкладке Settings через JS) */
+    /* Actions Footer (hidden on the Settings tab via JS) */
     .actions { display: flex; gap: 5px; margin-top: 15px; padding-top: 10px; border-top: 1px solid #333; }
     .action-btn { flex: 1; padding: 6px; background: #333; border: none; color: #ccc; font-size: 11px; cursor: pointer; border-radius: 4px; }
     .action-btn:hover { background: #444; color: #fff; }
@@ -106,13 +106,13 @@
     .groq-social-link { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: #333; color: #ccc; text-decoration: none; }
     .groq-social-link:hover { background: #444; color: #fff; }
     .groq-social-link img { width: 16px; height: 16px; border-radius: 3px; display: block; }
-    /* Source pills / colors (отличают источник информации) */
+    /* Source pills / colors (tell sources of information apart) */
     .src-zoundhub  { --src: #4da3ff; }
     .src-soundproof { --src: #b072ff; }
     .src-groq      { --src: #ffa726; }
     .src-pill { display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; color: #111; background: var(--src); flex-shrink: 0; }
 
-    /* AI DB: карточки источников */
+    /* AI DB: source cards */
     #sources-panel { display: none; flex-direction: column; gap: 8px; }
     .source-card { display: flex; align-items: center; gap: 10px; background: #222; border: 1px solid #333; border-left: 4px solid var(--src); border-radius: 6px; padding: 10px; transition: opacity 0.2s; }
     .source-card.disabled { opacity: 0.55; }
@@ -133,7 +133,7 @@
     .source-reload { flex: 0 0 auto; width: 28px; height: 28px; border: none; border-radius: 4px; background: #333; color: #ccc; cursor: pointer; font-size: 14px; }
     .source-reload:hover { background: #444; color: #fff; }
 
-    /* Info: карточка SoundProof */
+    /* Info: SoundProof card */
     .soundproof-box { border-left: 4px solid var(--src); }
     .groq-verdict-badge.lean-ai { background: #e08a1e; color: #fff; }
     .groq-verdict-badge.lean-human { background: #6aa84f; color: #fff; }
@@ -142,7 +142,7 @@
     .sp-bar .a { background: #ff4d4d; }
     .sp-line { display: flex; justify-content: space-between; font-size: 11px; color: #aaa; }
     .sp-line b { color: #fff; }
-    /* Компактные кнопки голосования — в стиле остальных кнопок расширения (#333, 10px) */
+    /* Compact vote buttons — styled like the extension's other buttons (#333, 10px) */
     .sp-vote-group { margin-left: auto; display: flex; gap: 4px; }
     .sp-vote-btn { padding: 3px 9px; background: #333; border: 1px solid transparent; color: #ccc; font-size: 10px; cursor: pointer; border-radius: 4px; transition: 0.15s; }
     .sp-vote-btn.human:hover:not(:disabled) { background: rgba(76, 175, 80, 0.18); color: #4caf50; }
@@ -154,7 +154,7 @@
     .sp-vote-note.error { color: #ff4444; }
     .sp-verified { color: #4caf50; font-size: 10px; margin-top: 4px; }
 
-    /* Иконки соцсетей — отдельная карточка: рамка/отступ у строки внутри уже не нужны */
+    /* Social icons — a separate card: the row inside no longer needs border/padding */
     .social-box .groq-social-row { margin-top: 0; padding-top: 0; border-top: none; }
     .groq-social-note { font-size: 10px; color: #666; margin-top: 6px; }
     .groq-social-link.search { background: transparent; border: 1px dashed #555; color: #888; box-sizing: border-box; }

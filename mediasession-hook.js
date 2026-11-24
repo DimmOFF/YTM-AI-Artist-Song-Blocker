@@ -1,13 +1,13 @@
 /*
- * YTM Ward — MAIN-world hook для медиа-клавиш.
+ * YTM Ward — MAIN-world hook for media keys.
  *
- * Медиа-клавиши (и кнопки Bluetooth-гарнитуры) не создают keydown-события в
- * странице: Chrome вызывает обработчик, который YouTube Music зарегистрировал
- * через navigator.mediaSession.setActionHandler('previoustrack', ...).
- * Изолированный content.js этот вызов увидеть не может, поэтому этот скрипт
- * запускается в MAIN world на document_start (до того, как YTM зарегистрирует
- * свои обработчики), оборачивает 'previoustrack' и перед вызовом оригинала
- * шлёт событие, которое слушает content.js.
+ * Media keys (and Bluetooth headset buttons) don't create keydown events in
+ * the page: Chrome calls the handler that YouTube Music registered
+ * via navigator.mediaSession.setActionHandler('previoustrack', ...).
+ * The isolated content.js can't see that call, so this script
+ * runs in the MAIN world at document_start (before YTM registers
+ * its handlers), wraps 'previoustrack' and, before calling the original,
+ * dispatches an event that content.js listens for.
  */
 (() => {
     const ms = navigator.mediaSession;

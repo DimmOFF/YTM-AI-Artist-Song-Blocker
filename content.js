@@ -5,29 +5,29 @@
 
 let blockList = [];
 let aiArtistList = [];
-// lower-case имя из базы → имя в оригинальном регистре (для записи в Whitelist)
+// lower-case name from the DB → name in original casing (for writing to the Whitelist)
 let aiArtistNames = new Map();
 
-// Whitelist: whitelist — все записи (артисты + ключевые слова + треки), whitelistArtists — только артисты
-// (по ним судим о строках в списках, где нам известен лишь артист).
+// Whitelist: whitelist — all entries (artists + keywords + tracks), whitelistArtists — artists only
+// (used to judge rows in lists where only the artist is known).
 let whitelist = [];
 let whitelistArtists = [];
 let whitelistKeywords = [];
-let whitelistTracks = new Set(); // названия треков (lower-case) — сравниваются точно, а не «по слову»
+let whitelistTracks = new Set(); // track titles (lower-case) — compared exactly, not word-by-word
 const WL_KEYS = ['whitelistedArtists', 'whitelistedKeywords', 'whitelistedTracks'];
 const BL_KEYS = ['blockedArtists', 'blockedKeywords', 'blockedTracks'];
-// Трек, который SoundProof признал AI по правилам автоскипа (порог перевеса + минимум голосов).
-// Нужен, чтобы бейдж и «назад» учитывали решение и после повторных пересчётов.
+// Track that SoundProof judged AI by the auto-skip rules (lead threshold + minimum votes).
+// Needed so the badge and "back" respect the decision even after repeated re-evaluations.
 let soundproofFlag = null; // { artist, title }
 function isSoundproofFlagged(song) {
     return !!soundproofFlag && !!song && soundproofFlag.title === song.title && soundproofFlag.artist === song.artist;
 }
 
-// Правила SoundProof для автоскипа (собственная реализация по описанию их поведения):
-//  • голосов нет или меньше минимума — не пропускаем;
-//  • проверенный модератором артист считается «практически стопроцентным»;
-//  • перевес = (AI − Human) / все голоса; пропускаем, если победили AI и перевес ≥ порога.
-// Порог и минимум голосов настраиваются в карточке SoundProof на вкладке AI DB.
+// SoundProof auto-skip rules (own implementation based on how they describe their behavior):
+//  • no votes, or fewer than the minimum — we don't skip;
+//  • a moderator-verified artist counts as "practically one hundred percent";
+//  • lead = (AI − Human) / all votes; skip if AI wins and the lead ≥ threshold.
+// Threshold and minimum votes are configured in the SoundProof card on the AI DB tab.
 async function checkSoundproof(artist) {
     try {
         const st = await chrome.storage.local.get(['sourceEnabled', 'soundproofThreshold', 'soundproofMinVotes']);
@@ -49,13 +49,13 @@ async function checkSoundproof(artist) {
         const lead = Math.round(((ai - human) / total) * 100);
         return { skip: lead >= threshold, lead, ai, human, threshold };
     } catch (e) {
-        return { skip: false }; // сеть/перезагрузка расширения — просто не вмешиваемся
+        return { skip: false }; // network/extension reload — just don't interfere
     }
 }
 
 let lastProcessedSong = ""; 
 
-// Дефолты — в defaults.js (общий файл для попапа и движка).
+// Defaults live in defaults.js (shared file for the popup and the engine).
 let aiActions = { ...DEFAULT_AI_ACTIONS };
 
 let engineEnabled = true;
@@ -127,7 +127,7 @@ function rebuildManualBlockList(localArtists, localKeywords, localTracks) {
         .sort();
 }
 
-// Текст записи для сравнения: у трека — title (так же, как матчится в блок-листе), иначе сама строка.
+// Entry text for comparison: title for a track (same as matched in the blocklist), otherwise the string itself.
 function termText(item) {
     const v = (item && typeof item === 'object') ? item.title : item;
     return typeof v === 'string' ? v.trim().toLowerCase() : '';
@@ -143,8 +143,8 @@ async function loadWhitelist() {
     console.log(`[YTM Ward] Whitelist: ${whitelist.length} terms, ${whitelistTracks.size} tracks.`);
 }
 
-// Удаляет из указанных списков записи, чей текст совпадает с одним из texts (без учёта регистра).
-// Нужно, чтобы Blocklist и Whitelist не содержали одну и ту же запись одновременно.
+// Removes entries from the given lists whose text matches one of texts (case-insensitive).
+// Needed so Blocklist and Whitelist never contain the same entry at the same time.
 async function removeFromLists(keys, texts) {
     const targets = new Set(texts.map(t => String(t || '').trim().toLowerCase()).filter(Boolean));
     if (!targets.size) return 0;
@@ -174,9 +174,9 @@ function isArtistTextWhitelisted(artistText) {
     return !!findWholeWordMatch(artistText.toLowerCase(), whitelistArtists);
 }
 
-// Клик по красному бейджу: добавляем в Whitelist найденных в AI-базе артистов
-// и убираем такие же записи из Blocklist.
-// Имена AI-артистов из базы, найденные в строке артиста (в оригинальном регистре).
+// Click on the red badge: add the artists found in the AI database to the Whitelist
+// and remove the same entries from the Blocklist.
+// Names of AI artists from the database found in the artist string (in original casing).
 function getAIMatchNames(artistText) {
     const lower = artistText.toLowerCase();
     const names = [];
@@ -203,7 +203,7 @@ async function addAIArtistsToWhitelist(artistText) {
     console.log(`[YTM Ward] ⚪ Whitelisted: ${names.join(', ')}`);
 }
 
-// Клик по белому бейджу в плеере: убираем из Whitelist все записи, из-за которых трек считается белым.
+// Click on the white badge in the player: remove from the Whitelist every entry that makes the track white.
 function wlKeysForScope(scope) {
     if (scope === 'artist') return ['whitelistedArtists'];
     if (scope === 'song') return ['whitelistedTracks'];
@@ -231,7 +231,7 @@ async function removeSongFromWhitelist(song, scope = 'all') {
     console.log(`[YTM Ward] Removed from whitelist: "${song.artist} — ${song.title}"`);
 }
 
-// Клик по белому бейджу в строке списка: убираем артиста (по тексту строки) и трек (по названию).
+// Click on the white badge in a list row: remove the artist (by row text) and the track (by title).
 async function removeRowFromWhitelist(artistText, title, scope = 'both') {
     const lower = artistText.toLowerCase();
     const titleLower = String(title || '').trim().toLowerCase();
@@ -254,7 +254,7 @@ async function removeRowFromWhitelist(artistText, title, scope = 'both') {
     if (Object.keys(update).length) await chrome.storage.local.set(update);
 }
 
-// Добавление в Whitelist конкретного трека (по названию). Из Blocklist убирается такой же трек.
+// Add a specific track (by title) to the Whitelist. The same track is removed from the Blocklist.
 async function addTrackToWhitelist(title, artist) {
     const clean = String(title || '').trim();
     if (!clean) return;
@@ -267,7 +267,7 @@ async function addTrackToWhitelist(title, artist) {
     console.log(`[YTM Ward] ⚪ Whitelisted track: "${clean}"`);
 }
 
-// ----- Меню выбора: в Whitelist по исполнителю или по треку -----
+// ----- Choice menu: add to Whitelist by artist or by track -----
 function closeWhitelistMenu() {
     const menu = document.getElementById("ytm-ward-wl-menu");
     if (menu) menu.remove();
@@ -278,9 +278,9 @@ function closeWhitelistMenu() {
     window.removeEventListener("resize", closeWhitelistMenu);
 }
 
-// Меню позиционируется один раз (position: fixed), поэтому при прокрутке оно «отрывалось»
-// бы от бейджа. Закрываем его при любой прокрутке страницы, колеса мыши или смене размера окна.
-// Скролл в YTM идёт во внутренних контейнерах, поэтому слушаем в capture-фазе на document.
+// The menu is positioned once (position: fixed), so on scroll it would "detach"
+// from the badge. We close it on any page scroll, mouse wheel or window resize.
+// YTM scrolls inside inner containers, so we listen in the capture phase on document.
 function onWhitelistMenuScroll(e) {
     const menu = document.getElementById("ytm-ward-wl-menu");
     if (menu && e.target instanceof Node && menu.contains(e.target)) return;
@@ -296,13 +296,13 @@ function onWhitelistMenuKey(e) {
     if (e.key === "Escape") closeWhitelistMenu();
 }
 
-// options: [{ kind, value, action }] — kind это подпись («Artist» / «Song»), value — что будет добавлено.
+// options: [{ kind, value, action }] — kind is the label ("Artist" / "Song"), value is what will be added.
 function showWhitelistMenu(anchor, options, title = "Add to whitelist") {
     const existing = document.getElementById("ytm-ward-wl-menu");
     if (existing) {
         const sameAnchor = existing._anchor === anchor;
         closeWhitelistMenu();
-        if (sameAnchor) return; // повторный клик по бейджу закрывает меню
+        if (sameAnchor) return; // a second click on the badge closes the menu
     }
 
     const menu = document.createElement("div");
@@ -331,7 +331,7 @@ function showWhitelistMenu(anchor, options, title = "Add to whitelist") {
             font: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         `;
         btn.textContent = opt.kind;
-        btn.title = opt.value; // что именно будет добавлено — во всплывающей подсказке
+        btn.title = opt.value; // what exactly will be added — in the tooltip
         btn.addEventListener("mouseenter", () => { btn.style.background = "#333"; });
         btn.addEventListener("mouseleave", () => { btn.style.background = "transparent"; });
         btn.addEventListener("click", (e) => {
@@ -345,7 +345,7 @@ function showWhitelistMenu(anchor, options, title = "Add to whitelist") {
 
     document.body.appendChild(menu);
 
-    // Позиция: под бейджем, а если не помещается (плеер внизу экрана) — над ним
+    // Position: below the badge, or above it if it doesn't fit (player at the bottom of the screen)
     const r = anchor.getBoundingClientRect();
     const mh = menu.offsetHeight;
     const top = (r.bottom + 6 + mh > window.innerHeight) ? Math.max(4, r.top - mh - 6) : r.bottom + 6;
@@ -360,8 +360,8 @@ function showWhitelistMenu(anchor, options, title = "Add to whitelist") {
     window.addEventListener("resize", closeWhitelistMenu);
 }
 
-// Меню «Remove from whitelist»: показываем только те варианты, по которым запись реально есть.
-// hits: { artist, song, keyword } — что именно сейчас делает трек «белым».
+// "Remove from whitelist" menu: show only the options that actually have an entry.
+// hits: { artist, song, keyword } — what exactly makes the track "white" right now.
 function showRemoveMenu(anchor, hits, values, doRemove) {
     const options = [];
     if (hits.artist) options.push({ kind: "Artist", value: values.artist, action: () => doRemove('artist') });
@@ -394,7 +394,7 @@ async function onPlayerBadgeClick(e) {
     ]);
 }
 
-// Название трека в строке списка/очереди (у карточек альбомов/исполнителей трека нет — вернёт '').
+// Track title in a list/queue row (album/artist cards have no track — returns '').
 function getRowTitle(row) {
     if (row.tagName.toLowerCase() === "ytmusic-two-row-item-renderer") return "";
     const el = row.querySelector("yt-formatted-string.title") || row.querySelector(".song-title") || row.querySelector(".title");
@@ -412,7 +412,7 @@ async function updateBlockList() {
     const localArtists = localData.blockedArtists || [];
     const localKeywords = localData.blockedKeywords || []; 
     const localTracks = localData.blockedTracks || []; 
-    // Источник ZoundHub можно выключить на вкладке AI DB (по умолчанию включён)
+    // The ZoundHub source can be turned off on the AI DB tab (on by default)
     const zoundhubEnabled = !(localData.sourceEnabled && localData.sourceEnabled.zoundhub === false);
     
     let remoteArtists = [];
@@ -448,13 +448,13 @@ async function updateBlockList() {
     scheduleScan();
 }
 
-// «Целое слово» с поддержкой Unicode: \b в JS видит только ASCII, поэтому кириллица
-// и названия со скобками/знаками по краям (напр. "Song (feat. X)") никогда не совпадали.
-// Раньше на КАЖДЫЙ термин при КАЖДОМ вызове создавался новый RegExp с unicode-флагом.
-// При тысячах записей в AI-базе и сотне строк на странице это блокировало главный поток
-// на секунды (интерфейс YouTube Music подвисал при скролле и загрузке списков).
-// Теперь: сначала дешёвая проверка includes(), а регулярка (скомпилированная один раз,
-// кэшируется) строится только для терминов, которые вообще встречаются в тексте.
+// Unicode-aware "whole word": \b in JS only sees ASCII, so Cyrillic
+// and titles with brackets/signs at the edges (e.g. "Song (feat. X)") never matched.
+// Previously a new RegExp with the unicode flag was created for EVERY term on EVERY call.
+// With thousands of entries in the AI database and a hundred rows on the page this blocked the main thread
+// for seconds (the YouTube Music UI froze on scroll and list loads).
+// Now: a cheap includes() check first, and the regex (compiled once,
+// cached) is built only for terms that actually occur in the text.
 const termRegexCache = new Map();
 
 function matchesTermLowered(lowerText, term) {
@@ -464,7 +464,7 @@ function matchesTermLowered(lowerText, term) {
     if (!regex) {
         const safeTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         regex = new RegExp(`(?<![\\p{L}\\p{N}_])${safeTerm}(?![\\p{L}\\p{N}_])`, 'iu');
-        if (termRegexCache.size > 20000) termRegexCache.clear(); // защита от неограниченного роста
+        if (termRegexCache.size > 20000) termRegexCache.clear(); // guard against unbounded growth
         termRegexCache.set(term, regex);
     }
     return regex.test(lowerText);
@@ -508,7 +508,7 @@ function isAlreadyDisliked(dislikeWrapper, actualBtn, song) {
     return domPressed || memoryPressed;
 }
 
-function handleDislikeAndSkip(song) {
+function handleDislikeAndSkip(song, forceSkip = false) {
     hideBadgeImmediately();
 
     const dislikeWrapper = document.querySelector(".middle-controls-buttons .dislike") || 
@@ -530,6 +530,7 @@ function handleDislikeAndSkip(song) {
         console.log("[YTM Ward] The dislike button hasn't been pressed — pressing it now.");
         simulateClick(actualBtn);
         if (song) dislikedTracksThisSession.add(trackKey(song));
+        if (forceSkip) skipTrack();
     }
 }
 
@@ -538,9 +539,9 @@ function extractArtistOnly(rawByline) {
 }
 
 function getBylineText(bylineEl) {
-    // Бейдж "AI" лежит ВНУТРИ byline (prepend) — его текст "AI" нельзя
-    // учитывать при распознавании артиста, иначе artist станет "AI<name>",
-    // мэтч пропадёт, бейдж снимется, мэтч вернётся... = мигание.
+    // The "AI" badge sits INSIDE the byline (prepend) — its "AI" text must not
+    // be taken into account when detecting the artist, otherwise artist becomes "AI<name>",
+    // the match breaks, the badge is removed, the match returns... = flicker.
     const badge = bylineEl.querySelector("#ytm-ward-ai-badge");
     if (!badge) return bylineEl.textContent.trim();
     const clone = bylineEl.cloneNode(true);
@@ -560,15 +561,15 @@ function getSongInfo() {
         title: titleEl.textContent.trim(),
         artist: extractArtistOnly(rawByline),
         rawByline,
-        // NEW: YTM продолжает показывать title/byline последнего трека и на
-        // паузе — это не баг страницы, но вкладке Info нужно знать реальное
-        // состояние воспроизведения, а не только "какой трек загружен".
+        // NEW: YTM keeps showing the last track's title/byline while
+        // paused — that's not a page bug, but the Info tab needs the real
+        // playback state, not just "which track is loaded".
         isPaused: video ? video.paused : false
     };
 }
 
-// Красный бейдж — AI-артист из базы; белый с тёмной обводкой — артист в Whitelist.
-// Размеры у обоих одинаковые (у красного обводка прозрачная), чтобы бейдж не «прыгал» при смене цвета.
+// Red badge — AI artist from the database; white with a dark outline — artist in the Whitelist.
+// Both have the same size (the red one has a transparent outline) so the badge doesn't "jump" when the color changes.
 function applyBadgeLook(badge, whitelisted) {
     const isSmall = badge.dataset.size === 'small';
     badge.dataset.wl = whitelisted ? '1' : '0';
@@ -650,7 +651,7 @@ function scanRowsForBadges() {
         if (artistLinks.length) {
             artistText = artistLinks.map(a => a.textContent.trim()).join(", ");
         } else {
-            // Тот же фикс, что в плеере: текст бейджа не должен попадать в artistText
+            // Same fix as in the player: the badge text must not leak into artistText
             const clone = bylineEl.cloneNode(true);
             clone.querySelector(".ytm-ward-row-ai-badge")?.remove();
             artistText = extractArtistOnly(clone.textContent.trim());
@@ -674,7 +675,7 @@ function scanRowsForBadges() {
         if (shouldShow && !badge) {
             badge = makeBadgeElement('small', isWhite);
             badge.classList.add("ytm-ward-row-ai-badge");
-            // Клик по бейджу не должен запускать воспроизведение строки
+            // A click on the badge must not start playback of the row
             ['dblclick', 'mousedown'].forEach(type => badge.addEventListener(type, e => e.stopPropagation()));
             badge.addEventListener("click", (e) => {
                 e.preventDefault();
@@ -690,7 +691,7 @@ function scanRowsForBadges() {
                     showRemoveMenu(badge, hits, { artist: text, song: title }, scope => removeRowFromWhitelist(text, title, scope));
                     return;
                 }
-                if (!title) { addAIArtistsToWhitelist(text); return; } // трека нет (альбом/исполнитель) — только по исполнителю
+                if (!title) { addAIArtistsToWhitelist(text); return; } // no track (album/artist) — artist only
                 showWhitelistMenu(badge, [
                     { kind: "Artist", value: getAIMatchNames(text).join(", ") || text, action: () => addAIArtistsToWhitelist(text) },
                     { kind: "Song", value: title, action: () => addTrackToWhitelist(title, text) }
@@ -743,8 +744,8 @@ function scheduleDislikeAndSkipCheck(song) {
     }, ACTION_DELAY_MS);
 }
 
-// Реакция на заблокированный (ручной список) трек — та же, что выбрана
-// в настройках для AI: дизлайк, если он включён, иначе скип, если включён он.
+// Reaction to a blocked (manual list) track — the same action chosen
+// in the settings for AI: dislike if it's on, otherwise skip if that's on.
 function performConfiguredAction(song) {
     if (aiActions.dislike) handleDislikeAndSkip(song);
     else if (aiActions.skipAi) skipTrack();
@@ -779,23 +780,23 @@ function scheduleBadgeUpdate() {
         const whitelisted = isWhitelistedSong(song);
         updateAIBadge(aiMatch && aiActions.label, whitelisted);
 
-        // NEW: текущий трек пишем в storage — его читает вкладка Info в попапе
-        // (popup.js не имеет доступа к DOM страницы, только к chrome.storage).
+        // NEW: write the current track to storage — the Info tab in the popup reads it
+        // (popup.js has no access to the page DOM, only to chrome.storage).
         chrome.storage.local.set({
             nowPlaying: { artist: song.artist, title: song.title, aiMatch, whitelisted, isPaused: song.isPaused, updatedAt: Date.now() }
         });
     }, BADGE_SETTLE_MS);
 }
 
-// NEW: статистика для вкладки Info — считаем ТОЛЬКО авто-блокировки по
-// AI-базе (не ручные Keywords/Songs/Artists), в момент, когда расширение
-// САМО инициирует скип/дизлайк из-за обнаружения AI-исполнителя.
+// NEW: stats for the Info tab — count ONLY auto-blocks by the
+// AI database (not manual Keywords/Songs/Artists), at the moment the extension
+// ITSELF initiates a skip/dislike because an AI artist was detected.
 async function recordAIBlock() {
     const data = await chrome.storage.local.get(['stats']);
     const stats = data.stats || { totalBlocked: 0, dailyBlocked: {}, firstBlockedAt: null };
 
     const now = Date.now();
-    const dayKey = new Date(now).toLocaleDateString('en-CA'); // YYYY-MM-DD по локальному времени
+    const dayKey = new Date(now).toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
 
     stats.totalBlocked = (stats.totalBlocked || 0) + 1;
     stats.dailyBlocked = stats.dailyBlocked || {};
@@ -810,19 +811,19 @@ function hideBadgeImmediately() {
     updateAIBadge(false);
 }
 
-// ===== «Назад» пропускает треки, которые расширение само бы скипнуло =====
-// Проблема: на 5-м треке жмём «назад» → YTM включает 4-й (AI) → расширение его
-// скипает вперёд → снова играет 5-й. Теперь после пользовательского клика по
-// «назад» мы сами листаем назад, пока не встретим трек, который расширение
-// не стало бы скипать (не AI / не в ручном бане), и останавливаемся на нём.
-const BACK_SETTLE_MS = 700;      // ждём, пока title и byline нового трека обновятся согласованно
-const BACK_TITLE_WAIT_MS = 3000; // сколько ждём смены трека после клика «назад»
-const BACK_MAX_STEPS = 100;      // предохранитель от бесконечного цикла
+// ===== "Back" skips tracks the extension itself would have skipped =====
+// Problem: on track 5 we press "back" → YTM starts track 4 (AI) → the extension
+// skips forward → track 5 plays again. Now, after a user click on
+// "back" we walk back ourselves until we meet a track the extension
+// would not skip (not AI / not manually banned), and stop there.
+const BACK_SETTLE_MS = 700;      // wait until the new track's title and byline update consistently
+const BACK_TITLE_WAIT_MS = 3000; // how long we wait for the track to change after a "back" click
+const BACK_MAX_STEPS = 100;      // safeguard against an endless loop
 let backSeekActive = false;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-// Резолвит новый song, как только title отличается от prevTitle; null — если не дождались.
+// Resolves the new song as soon as title differs from prevTitle; null if it never came.
 function waitForTitleChange(prevTitle, timeoutMs) {
     return new Promise(resolve => {
         const started = Date.now();
@@ -836,10 +837,10 @@ function waitForTitleChange(prevTitle, timeoutMs) {
     });
 }
 
-// Скипнуло бы расширение этот трек само? (ручной бан, либо AI при включённых
-// Dislike AI and Skip / Skip AI). Если действия выключены — «назад» работает как обычно.
+// Would the extension skip this track itself? (manual ban, or AI with
+// Dislike AI and Skip / Skip AI enabled). If actions are off, "back" works as usual.
 function wouldAutoHandle(song) {
-    if (isWhitelistedSong(song)) return false; // Whitelist главнее любых блокировок
+    if (isWhitelistedSong(song)) return false; // Whitelist beats any blocks
     const manualBlocked = !!findWholeWordMatch((song.artist + " " + song.title).toLowerCase(), blockList);
     const aiMatch = findWholeWordMatch(song.artist.toLowerCase(), aiArtistList) || isSoundproofFlagged(song);
     return (manualBlocked || !!aiMatch) && (aiActions.dislike || aiActions.skipAi);
@@ -854,12 +855,12 @@ async function backSeekFlow(originSong) {
     let wasMuted = null;
     try {
         const first = await waitForTitleChange(originSong.title, BACK_TITLE_WAIT_MS);
-        // Title не изменился — YTM просто перемотал текущий трек в начало
-        // (так он делает, если играло больше ~3 сек). Это не переход назад.
+        // Title didn't change — YTM just rewound the current track to the start
+        // (that's what it does if it played for more than ~3 sec). This is not going back.
         if (!first) return;
         moved = true;
 
-        // Глушим звук на время перемотки, чтобы AI-треки не проигрывались вслух
+        // Mute while seeking back so AI tracks aren't played out loud
         const video = document.querySelector("video");
         if (video) { wasMuted = video.muted; video.muted = true; }
 
@@ -881,8 +882,8 @@ async function backSeekFlow(originSong) {
 
             const next = await waitForTitleChange(song.title, BACK_TITLE_WAIT_MS);
             if (!next) {
-                // Дошли до начала очереди — дальше назад некуда. Обычная логика
-                // ниже сама прогонит этот трек (и следующие AI) вперёд.
+                // Reached the start of the queue — nowhere further back. The normal logic
+                // below will push this track (and the next AI ones) forward itself.
                 console.log("[YTM Ward] ⏮ Back: reached the start of the queue.");
                 break;
             }
@@ -894,7 +895,7 @@ async function backSeekFlow(originSong) {
         }
         backSeekActive = false;
         if (moved) {
-            // Отдаём итоговый трек обычной логике (плашка и т.д.)
+            // Hand the final track to the normal logic (badge, etc.)
             lastProcessedSong = "";
             settleTitle = null;
             checkAndSkip();
@@ -903,22 +904,22 @@ async function backSeekFlow(originSong) {
     }
 }
 
-// Общая точка входа: запоминаем текущий трек ДО того, как YTM переключится, и запускаем перемотку.
+// Common entry point: remember the current track BEFORE YTM switches, then start seeking back.
 function triggerBackSeek() {
     if (!engineEnabled || backSeekActive) return;
     const origin = getSongInfo();
     if (origin) backSeekFlow(origin);
 }
 
-// 1) Клик мышью по «назад». Только настоящие клики (isTrusted) — свои simulateClick из цикла выше игнорируем.
+// 1) Mouse click on "back". Only real clicks (isTrusted) — ignore our own simulateClick from the loop above.
 function onPlayerBarClick(e) {
     if (!e.isTrusted) return;
     if (!e.target.closest || !e.target.closest(".previous-button")) return;
     triggerBackSeek();
 }
 
-// 2) Горячая клавиша YTM «предыдущий трек» — Shift+P. По e.code, чтобы работало
-// и на русской раскладке. В полях ввода (поиск и т.п.) не реагируем.
+// 2) YTM "previous track" hotkey — Shift+P. Checked by e.code so it works
+// on the Russian layout too. We don't react inside input fields (search etc.).
 function onGlobalKeyDown(e) {
     if (!e.isTrusted || e.repeat) return;
     if (e.code !== "KeyP" || !e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
@@ -927,7 +928,7 @@ function onGlobalKeyDown(e) {
     triggerBackSeek();
 }
 
-// 3) Медиа-клавиши и кнопки гарнитуры — событие шлёт mediasession-hook.js (MAIN world).
+// 3) Media keys and headset buttons — the event is sent by mediasession-hook.js (MAIN world).
 document.addEventListener("ytm-ward:prev-media", triggerBackSeek);
 
 
@@ -956,7 +957,7 @@ async function processSettledSong(expectedTitle) {
     if (song.title === lastProcessedSong) return;
     lastProcessedSong = song.title;
 
-    // Whitelist главнее и ручного блок-листа, и AI-базы — никаких действий с таким треком
+    // Whitelist beats both the manual blocklist and the AI database — no actions on such a track
     if (whitelisted) return;
 
     const checkString = (song.artist + " " + song.title).toLowerCase();
@@ -967,12 +968,12 @@ async function processSettledSong(expectedTitle) {
         return;
     }
 
-    // Второй источник: голоса SoundProof. Спрашиваем, только если ZoundHub артиста не знает
-    // и расширение вообще что-то делает с AI-треками (метка или скип).
+    // Second source: SoundProof votes. Ask only if ZoundHub doesn't know the artist
+    // and the extension does anything with AI tracks at all (label or skip).
     if (!aiMatch && (aiActions.label || aiActions.dislike || aiActions.skipAi)) {
         const verdict = await checkSoundproof(song.artist);
 
-        // Пока ждали ответ, трек мог смениться (или началось «назад») — тогда решение устарело.
+        // While we waited for the answer the track may have changed (or "back" started) — then the decision is stale.
         const now = getSongInfo();
         if (backSeekActive || !now || now.title !== song.title) return;
 
@@ -986,10 +987,10 @@ async function processSettledSong(expectedTitle) {
 
     if (aiMatch) {
         if (aiActions.dislike) {
-            // "Dislike AI and Skip" имеет приоритет — "Skip AI" при этом игнорируется
+            // "Dislike AI and Skip" takes priority — "Skip AI" is ignored in that case
             scheduleDislikeAndSkipCheck(song);
         } else if (aiActions.skipAi) {
-            // "Skip AI" — сразу, без задержки и без дизлайка
+            // "Skip AI" — immediately, with no delay and no dislike
             console.log(`[YTM Ward] 🤖 AI detected (Skip AI, instantly) — artist="${song.artist}"`);
             recordAIBlock();
             skipTrack();
@@ -997,8 +998,8 @@ async function processSettledSong(expectedTitle) {
     }
 }
 
-// NEW: кнопки "Ban Artist" / "Ban Song" в стиле Material Design —
-// tonal-кнопка (M3 error container), пилюля, иконка + ripple-эффект по клику.
+// NEW: "Ban Artist" / "Ban Song" buttons in Material Design style —
+// tonal button (M3 error container), pill, icon + ripple effect on click.
 
 function ensureMaterialButtonStyles() {
     if (document.getElementById("ytm-ward-md-styles")) return;
@@ -1070,7 +1071,7 @@ function spawnRipple(btn, event) {
     ripple.style.left = `${x}px`;
     ripple.style.top = `${y}px`;
     ripple.classList.remove("is-animating");
-    void ripple.offsetWidth; // reflow, чтобы анимация перезапускалась при повторных кликах
+    void ripple.offsetWidth; // reflow so the animation restarts on repeated clicks
     ripple.classList.add("is-animating");
 }
 
@@ -1145,12 +1146,14 @@ async function addToBlockList(term, listName, songAtClick) {
         const update = {};
         update[targetList] = list;
         await chrome.storage.local.set(update);
-        // Бан и Whitelist взаимоисключающие: такая же запись в Whitelist убирается
+        // Ban and Whitelist are mutually exclusive: the same entry is removed from the Whitelist
         await removeFromLists(WL_KEYS, [termText(term)]);
         await refreshManualBlockList(); 
         const currentSong = getSongInfo();
         if (songAtClick && currentSong && currentSong.title === songAtClick.title) {
-             performConfiguredAction(getSongInfo());
+            // Ban always removes the track now: dislike if that action is on, then skip.
+            if (aiActions.dislike) handleDislikeAndSkip(currentSong, true);
+            else skipTrack();
         } else {
             scheduleScan(); 
         }
@@ -1167,17 +1170,17 @@ async function init() {
     const nextBtn = playerBar.querySelector(".next-button");
     const prevBtn = playerBar.querySelector(".previous-button");
     [nextBtn, prevBtn].forEach(btn => {
-        // Было hideBadgeImmediately: на каждый клик next/prev бейдж снимался
-        // сразу, а через ~60мс ставился обратно = гарантированный блик.
-        // Теперь просто ждём settle (250мс) и один раз выставляем итог.
+        // It used to be hideBadgeImmediately: on every next/prev click the badge was removed
+        // at once and put back ~60ms later = guaranteed flicker.
+        // Now we just wait for settle (250ms) and set the final state once.
         if (btn) btn.addEventListener("click", scheduleBadgeUpdate, true);
     });
-    // Делегирование на весь player bar — не теряется, если YTM перерисует саму кнопку
+    // Delegation on the whole player bar — survives YTM re-rendering the button itself
     playerBar.addEventListener("click", onPlayerBarClick, true);
     document.addEventListener("keydown", onGlobalKeyDown, true);
 
-    // Прогресс-бар и таймер внутри player bar меняются каждую секунду — не гоняем
-    // checkAndSkip на каждую мутацию, а сворачиваем их в один вызов раз в 200 мс.
+    // The progress bar and timer inside the player bar change every second, so we don't run
+    // checkAndSkip on every mutation — mutations are coalesced into one call per 200ms.
     let checkQueued = false;
     const observer = new MutationObserver(() => {
         if (!checkQueued) {
@@ -1199,8 +1202,8 @@ async function init() {
 
     const bylineNode = document.querySelector("ytmusic-player-bar .byline");
     if (bylineNode) {
-        // Игнорируем собственные мутации бейджа (prepend/remove внутри byline),
-        // иначе каждая наша вставка перезапускала бы scheduleBadgeUpdate = цикл/мигание.
+        // Ignore our own badge mutations (prepend/remove inside the byline),
+        // otherwise every insertion would restart scheduleBadgeUpdate = loop/flicker.
         new MutationObserver((mutations) => {
             for (const m of mutations) {
                 for (const n of m.addedNodes) {
@@ -1216,17 +1219,17 @@ async function init() {
             .observe(bylineNode, { characterData: true, subtree: true, childList: true });
     }
 
-    // NEW: пауза/плей не меняют title/byline, поэтому их наблюдатели выше
-    // тут не сработают — слушаем сам <video>, чтобы Now Playing на вкладке
-    // Info отражал реальное состояние воспроизведения сразу, а не только
-    // при следующей смене трека.
+    // NEW: play/pause doesn't change title/byline, so the observers above won't
+    // fire — listen to <video> itself so Now Playing in the Info tab
+    // reflects the real playback state immediately, not only
+    // on the next track change.
     const video = document.querySelector("video");
     if (video) {
         video.addEventListener("play", scheduleBadgeUpdate);
         video.addEventListener("pause", scheduleBadgeUpdate);
     }
 
-    scheduleBadgeUpdate(); // выставить корректное состояние бейджа сразу при инициализации
+    scheduleBadgeUpdate(); // set the correct badge state right away on init
 }
 
 if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init); } else { init(); }
@@ -1244,8 +1247,8 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
             closeWhitelistMenu();
             removeInjectedButtons();
         } else {
-            lastProcessedSong = ""; // пересчитать текущий трек с нуля после включения
-            settleTitle = null;     // иначе checkAndSkip() решит, что title не менялся, и ничего не запустит
+            lastProcessedSong = ""; // re-check the current track from scratch after enabling
+            settleTitle = null;     // otherwise checkAndSkip() thinks the title didn't change and does nothing
             injectButtons();
             checkAndSkip();
             scanRowsForBadges();
@@ -1255,12 +1258,12 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     }
 
     if (changes.aiActions) {
-        clearTimeout(pendingActionTimer); // иначе запланированный дизлайк сработает уже после выключения настройки
+        clearTimeout(pendingActionTimer); // otherwise a scheduled dislike fires after the setting is turned off
         loadAIActions().then(() => {
-            // NEW: сброс "уже обработан" — иначе трек, который уже проверялся
-            // при старых настройках, не пересчитается заново под новые
+            // NEW: reset "already processed" — otherwise a track already checked
+            // under the old settings wouldn't be recomputed under the new ones
             lastProcessedSong = "";
-            settleTitle = null; // иначе checkAndSkip() решит, что title не менялся, и ничего не запустит
+            settleTitle = null; // otherwise checkAndSkip() thinks the title didn't change and does nothing
             scheduleScan();
             checkAndSkip();
             scheduleBadgeUpdate();
@@ -1268,9 +1271,9 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         return;
     }
 
-    // Whitelist изменили (из попапа или кликом по бейджу): перечитываем и пересчитываем текущий трек.
-    // Отложенное действие над треком отменяем — иначе трек, только что попавший в Whitelist, мог бы
-    // успеть получить дизлайк/скип.
+    // Whitelist changed (from the popup or a badge click): reload and re-check the current track.
+    // Cancel any pending action — a track just added to the Whitelist could otherwise
+    // still get a dislike/skip.
     if (changes.whitelistedArtists || changes.whitelistedKeywords || changes.whitelistedTracks) {
         loadWhitelist().then(() => {
             clearTimeout(pendingActionTimer);
@@ -1283,20 +1286,20 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         });
     }
 
-    // NEW: раньше сюда попадал ЛЮБОЙ другой ключ storage (включая новые
-    // nowPlaying/stats/groqApiKey) и это вызывало полный updateBlockList()
-    // с сетевым запросом к ZoundHub. nowPlaying пишется на каждую смену
-    // трека — так что без этого фильтра AI-база переcкачивалась бы заново
-    // на каждый трек. Реагируем только на реальные изменения блок-листов.
+    // NEW: previously ANY other storage key (including the new
+    // nowPlaying/stats/groqApiKey) landed here and triggered a full updateBlockList()
+    // with a ZoundHub network request. nowPlaying is written on every track
+    // change, so without this filter the AI database would be re-downloaded
+    // on every track. React only to real block-list changes.
     if (changes.blockedArtists || changes.blockedKeywords || changes.blockedTracks) {
         updateBlockList();
     }
 
-    // Источник ZoundHub включили/выключили на вкладке AI DB: пересобираем
-    // список и сбрасываем кэш «уже проверено» у строк и текущего трека.
+    // ZoundHub source toggled on the AI DB tab: rebuild the
+    // list and drop the "already checked" cache for rows and the current track.
     const prevZ = !(changes.sourceEnabled && changes.sourceEnabled.oldValue && changes.sourceEnabled.oldValue.zoundhub === false);
     const nextZ = !(changes.sourceEnabled && changes.sourceEnabled.newValue && changes.sourceEnabled.newValue.zoundhub === false);
-    // Источник SoundProof включили/выключили или поменяли правила скипа — пересчитываем текущий трек.
+    // SoundProof source toggled or its skip rules changed — re-check the current track.
     const prevS = !(changes.sourceEnabled && changes.sourceEnabled.oldValue && changes.sourceEnabled.oldValue.soundproof === false);
     const nextS = !(changes.sourceEnabled && changes.sourceEnabled.newValue && changes.sourceEnabled.newValue.soundproof === false);
     if ((changes.sourceEnabled && prevS !== nextS) || changes.soundproofThreshold || changes.soundproofMinVotes) {
