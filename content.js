@@ -67,6 +67,18 @@ function extensionAlive() {
     try { return !!chrome.runtime?.id; } catch (e) { return false; }
 }
 
+// Set when the user pauses the player: the engine must not switch tracks while
+// they hold it, otherwise an all-AI playlist skips forever and can't be stopped.
+// Reset as soon as playback resumes.
+let autoActionsSuspended = false;
+
+function suspendAutoActions() {
+    if (autoActionsSuspended) return;
+    autoActionsSuspended = true;
+    clearTimeout(pendingActionTimer);
+    console.log("[YTM Ward] Player paused — auto switching suspended until playback resumes.");
+}
+
 let dislikedTracksThisSession = new Set();
 function trackKey(song) { return `${song.artist}||${song.title}`; }
 
@@ -500,6 +512,7 @@ function skipTrack(expectedSong) {
     if (nextBtn) simulateClick(nextBtn);
 
     setTimeout(() => {
+        if (autoActionsSuspended) return; // paused right after the click — don't force the track to end
         const songNow = getSongInfo();
         if (songBeforeSkip && songNow && songNow.title !== songBeforeSkip.title) return;
 
@@ -740,6 +753,7 @@ function scheduleScan() {
 function scheduleDislikeAndSkipCheck(song) {
     clearTimeout(pendingActionTimer);
     pendingActionTimer = setTimeout(() => {
+        if (autoActionsSuspended) return; // user paused — no auto actions
         const current = getSongInfo();
         if (!current || current.title !== song.title) {
             console.log(`[YTM Ward] Track changed during the delay — action for "${song.title}" cancelled.`);
@@ -761,6 +775,7 @@ function performConfiguredAction(song) {
 function scheduleManualBlockCheck(song, matchedTerm) {
     clearTimeout(pendingActionTimer);
     pendingActionTimer = setTimeout(() => {
+        if (autoActionsSuspended) return; // user paused — no auto actions
         const current = getSongInfo();
         if (!current || current.title !== song.title) {
             console.log(`[YTM Ward] Track changed during the delay — action for "${song.title}" cancelled.`);
@@ -923,6 +938,21 @@ function triggerBackSeek() {
 // 1) Mouse click on "back". Only real clicks (isTrusted) — ignore our own simulateClick from the loop above.
 function onPlayerBarClick(e) {
     if (!e.isTrusted) return;
+
+    // User pressed pause/play. This runs in the capture phase, before YTM toggles
+    // playback, so video.paused still holds the state the user is leaving.
+    if (e.target.closest && e.target.closest("#play-pause-button, .play-pause-button")) {
+        const video = document.querySelector("video");
+        if (video && !video.paused) suspendAutoActions();
+        // Re-check shortly after the click: it may land between tracks, where the
+        // video is not playing yet even though the user just pressed pause.
+        setTimeout(() => {
+            const v = document.querySelector("video");
+            if (v && v.paused) suspendAutoActions();
+        }, 150);
+        return;
+    }
+
     if (!e.target.closest || !e.target.closest(".previous-button")) return;
     triggerBackSeek();
 }
@@ -968,6 +998,9 @@ async function processSettledSong(expectedTitle) {
 
     // Whitelist beats both the manual blocklist and the AI database — no actions on such a track
     if (whitelisted) return;
+
+    // User paused the player — leave the current track alone until playback resumes.
+    if (autoActionsSuspended) return;
 
     const checkString = (song.artist + " " + song.title).toLowerCase();
     const manualTerm = findWholeWordMatch(checkString, blockList);
@@ -1234,7 +1267,13 @@ async function init() {
     // on the next track change.
     const video = document.querySelector("video");
     if (video) {
-        video.addEventListener("play", scheduleBadgeUpdate);
+        video.addEventListener("play", () => {
+            if (autoActionsSuspended) {
+                autoActionsSuspended = false;
+                console.log("[YTM Ward] Playback resumed — auto switching is active again.");
+            }
+            scheduleBadgeUpdate();
+        });
         video.addEventListener("pause", scheduleBadgeUpdate);
     }
 
